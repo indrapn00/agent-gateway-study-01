@@ -1,0 +1,36 @@
+[
+  {
+    "description": "Rule 1: Allow agent runtimes in project to reach Core Google APIs",
+    "effect": "ALLOW",
+    "principals": [
+      "principalSet://agents.global.org-304553879287.system.id.goog/attribute.platformContainer/aiplatform/projects/66063681189"
+    ],
+    "operation": {
+      "permissions": [
+        "iap.googleapis.com/resources.egressViaIAP"
+      ]
+    },
+    "conditions": {
+      "iap.googleapis.com": {
+        "expression": "destination.is_registered == true && destination.agent_registry.resource_type == 'ENDPOINT' && (destination.agent_registry.endpoint.name == 'projects/gcp-demo-02-307713/locations/us-central1/endpoints/core-gapi-services' || destination.agent_registry.endpoint.name == 'projects/gcp-demo-02-307713/locations/us-central1/endpoints/agentregistry-00000000-0000-0000-444f-0dd5654527c5' || destination.agent_registry.endpoint.name == 'projects/66063681189/locations/us-central1/endpoints/agentregistry-00000000-0000-0000-444f-0dd5654527c5')"
+      }
+    }
+  },
+  {
+    "description": "Rule 2: Allow ONLY network-agent-agw (SPIFFE ID) to call check-gcp-subnet-ips-agw",
+    "effect": "ALLOW",
+    "principals": [
+      "principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/8162536280341610496"
+    ],
+    "operation": {
+      "permissions": [
+        "iap.googleapis.com/resources.egressViaIAP"
+      ]
+    },
+    "conditions": {
+      "iap.googleapis.com": {
+        "expression": "destination.is_registered == true && destination.agent_registry.resource_type == 'AGENT' && (destination.agent_registry.agent.name == 'projects/gcp-demo-02-307713/locations/us-central1/agents/check-gcp-subnet-ips-agw' || destination.agent_registry.agent.name == 'projects/gcp-demo-02-307713/locations/us-central1/agents/agentregistry-00000000-0000-0000-bf2d-ca1285f7103b' || destination.agent_registry.agent.name == 'projects/66063681189/locations/us-central1/agents/agentregistry-00000000-0000-0000-bf2d-ca1285f7103b' || destination.agent_registry.agent.name == 'projects/gcp-demo-02-307713/locations/us-central1/agents/agentregistry-00000000-0000-0000-f25b-29d92d70d0d5' || destination.agent_registry.agent.name == 'projects/66063681189/locations/us-central1/agents/agentregistry-00000000-0000-0000-f25b-29d92d70d0d5')"
+      }
+    }
+  }
+]

@@ -1,0 +1,26 @@
+{
+  "name": "check_gcp_subnet_ips",
+  "description": "Standalone GCP Subnet Calculator Agent that calculates total IPs, usable IPs, netmask, and the 4 GCP-reserved IP addresses for any IPv4 CIDR block.",
+  "version": "1.0.0",
+  "supported_interfaces": [
+    {
+      "url": "https://<REPLACE_WITH_CHECK_GCP_SUBNET_IPS_CLOUD_RUN_URL>/a2a/check_gcp_subnet_ips",
+      "protocol_binding": "JSONRPC",
+      "protocol_version": "1.0"
+    }
+  ],
+  "default_input_modes": ["text/plain"],
+  "default_output_modes": ["text/plain"],
+  "capabilities": {
+    "streaming": false,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "check_gcp_subnet_ips",
+      "name": "check_gcp_subnet_ips",
+      "description": "Calculates usable IPs and 4 GCP-reserved addresses for a VPC CIDR block.",
+      "tags": ["gcp", "vpc", "subnet", "cidr"]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+name: agw-study-egress-authz-policy-iap
+target:
+  resources:
+  - "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress"
+policyProfile: REQUEST_AUTHZ
+action: CUSTOM
+customProvider:
+  authzExtension:
+    resources:
+    - "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-svc-ext-iap"

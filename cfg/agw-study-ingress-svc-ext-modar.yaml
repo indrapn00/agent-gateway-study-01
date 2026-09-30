@@ -1,0 +1,13 @@
+name: agw-study-ingress-svc-ext-modar
+service: modelarmor.us-central1.rep.googleapis.com
+forwardHeaders:
+- authorization
+metadata:
+  model_armor_settings: '[
+    {
+      "request_template_id": "projects/gcp-demo-02-307713/locations/us-central1/templates/agw-study-ingress-modar-req-template",
+      "response_template_id": "projects/gcp-demo-02-307713/locations/us-central1/templates/agw-study-ingress-modar-req-template"
+    }
+  ]'
+failOpen: false
+timeout: 5s

@@ -1,0 +1,26 @@
+{
+  "name": "network_agent",
+  "description": "Main Google Cloud Networking & Agent Gateway orchestrator agent that calls the remote check_gcp_subnet_ips agent and local recommend_agent_gateway_mode tool.",
+  "version": "1.0.0",
+  "supported_interfaces": [
+    {
+      "url": "https://<REPLACE_WITH_NETWORK_AGENT_CLOUD_RUN_URL>/a2a/network_agent",
+      "protocol_binding": "JSONRPC",
+      "protocol_version": "1.0"
+    }
+  ],
+  "default_input_modes": ["text/plain"],
+  "default_output_modes": ["text/plain"],
+  "capabilities": {
+    "streaming": false,
+    "push_notifications": false
+  },
+  "skills": [
+    {
+      "id": "network_agent",
+      "name": "network_agent",
+      "description": "Orchestrates GCP VPC subnet IP calculations (via remote check_gcp_subnet_ips agent) and Agent Gateway architecture recommendations.",
+      "tags": ["gcp", "networking", "agent-gateway", "a2a"]
+    }
+  ]
+}

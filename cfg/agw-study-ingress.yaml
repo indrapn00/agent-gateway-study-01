@@ -1,0 +1,5 @@
+name: agw-study-ingress
+protocols:
+- MCP
+googleManaged:
+  governedAccessPath: CLIENT_TO_AGENT

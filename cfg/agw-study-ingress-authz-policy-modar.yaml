@@ -1,0 +1,10 @@
+name: agw-study-ingress-authz-policy-modar
+target:
+  resources:
+  - "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress"
+policyProfile: CONTENT_AUTHZ
+action: CUSTOM
+customProvider:
+  authzExtension:
+    resources:
+    - "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-svc-ext-modar"
