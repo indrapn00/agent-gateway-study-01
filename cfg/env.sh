@@ -126,7 +126,7 @@ export AGW_EGRESS_NAME="${AGW_EGRESS_NAME:-agw-study-egress}"
 
 # Egress IAP v2 AuthzExtension & AuthzPolicy names
 #   - IMPORTANT UI COMPATIBILITY RULE:
-#     The Google Cloud Console UI (`Agent Platform -> Govern -> Gateways`) ONLY
+#     The Google Cloud Console UI (`Agent Platform -> Agents -> Gateways`) ONLY
 #     displays the "Access authorization" card and its UI "Remove" button if the
 #     AuthzPolicy is named `<AGW_EGRESS_NAME>-iap-authzpolicy` (and Extension is
 #     `<AGW_EGRESS_NAME>-iap-authzextension`).
@@ -144,7 +144,7 @@ export AGW_INGRESS_NAME="${AGW_INGRESS_NAME:-agw-study-ingress}"
 
 # Ingress Model Armor Template, AuthzExtension & AuthzPolicy names
 #   - IMPORTANT UI COMPATIBILITY RULE:
-#     The Google Cloud Console UI (`Agent Platform -> Govern -> Gateways`) ONLY
+#     The Google Cloud Console UI (`Agent Platform -> Agents -> Gateways`) ONLY
 #     displays the "AI Security" card and its UI "Remove" button if the
 #     AuthzPolicy is named `<AGW_INGRESS_NAME>-aisecurity-authzpolicy` (and Extension is
 #     `<AGW_INGRESS_NAME>-aisecurity-authzextension`).

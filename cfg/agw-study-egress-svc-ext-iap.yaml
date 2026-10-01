@@ -4,7 +4,7 @@
 #
 # VARIABLES TO CHANGE WHEN RE-DEPLOYING:
 #   1. `name`: AuthzExtension resource name (`AGW_EGRESS_EXT_NAME`).
-#      - Example: "agw-study-egress-svc-ext-iap"
+#      - Example: "agw-study-egress-iap-authzextension"
 #   Note: `service: iap.googleapis.com` is global and does NOT change across regions/projects.
 # ==============================================================================
 name: agw-study-egress-iap-authzextension

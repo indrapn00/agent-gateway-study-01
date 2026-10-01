@@ -93,7 +93,7 @@ cat > "${SCRIPT_DIR}/cfg/agw-study-egress-svc-ext-iap.yaml" << EOF
 #
 # VARIABLES TO CHANGE WHEN RE-DEPLOYING:
 #   1. \`name\`: AuthzExtension resource name (\`AGW_EGRESS_EXT_NAME\`).
-#      - Example: "agw-study-egress-svc-ext-iap"
+#      - Example: "agw-study-egress-iap-authzextension"
 #   Note: \`service: iap.googleapis.com\` is global and does NOT change across regions/projects.
 # ==============================================================================
 name: ${AGW_EGRESS_EXT_NAME}
@@ -116,7 +116,7 @@ cat > "${SCRIPT_DIR}/cfg/agw-study-egress-authz-policy-iap.yaml" << EOF
 #      - Example: "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress"
 #   2. \`customProvider.authzExtension.resources[0]\`: Replace PROJECT_ID ("${PROJECT_ID}"),
 #      REGION ("${REGION}"), and AGW_EGRESS_EXT_NAME ("${AGW_EGRESS_EXT_NAME}").
-#      - Example: "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-svc-ext-iap"
+#      - Example: "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-iap-authzextension"
 # ==============================================================================
 name: ${AGW_EGRESS_POLICY_NAME}
 target:
@@ -193,7 +193,7 @@ cat > "${SCRIPT_DIR}/cfg/agw-study-ingress-authz-policy-modar.yaml" << EOF
 #      - Example: "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress"
 #   2. \`customProvider.authzExtension.resources[0]\`: Replace PROJECT_ID ("${PROJECT_ID}"),
 #      REGION ("${REGION}"), and AGW_INGRESS_EXT_NAME ("${AGW_INGRESS_EXT_NAME}").
-#      - Example: "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-svc-ext-modar"
+#      - Example: "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-aisecurity-authzextension"
 # ==============================================================================
 name: ${AGW_INGRESS_POLICY_NAME}
 target:

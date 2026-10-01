@@ -70,18 +70,89 @@ flowchart LR
 
 ## 4. Minimal Python Code Changes (Annotated with `[AGENT GATEWAY STUDY NOTE]`)
 
-To keep your code as close as possible to `simple-agent-02`, we made **zero functional changes** to [`check_gcp_subnet_ips/agent.py`](./check_gcp_subnet_ips/agent.py) and only **3 small, clearly commented additions** to [`network_agent/agent.py`](./network_agent/agent.py):
+To keep your code as close as possible to `simple-agent-02`, we made **zero functional changes** to [`check_gcp_subnet_ips/agent.py`](./check_gcp_subnet_ips/agent.py) and only **4 small, clearly commented additions** (`STUDY NOTE 0` through `STUDY NOTE 3`) to [`network_agent/agent.py`](./network_agent/agent.py):
 
 ### 4.1 [`check_gcp_subnet_ips/agent.py`](./check_gcp_subnet_ips/agent.py)
 - **Lines 1–6 (`# [AGENT GATEWAY STUDY NOTE]`):** Explanatory comment only. Zero Python logic was changed because Agent Gateway attaches declaratively at deployment time (`identity_type="AGENT_IDENTITY"` and `agent_gateway_config`).
 
-### 4.2 [`network_agent/agent.py`](./network_agent/agent.py)
+### 4.2 [`network_agent/agent.py`](./network_agent/agent.py) (Exact Line Numbers & Verbatim Code)
 
-| Study Note Tag | Lines in [`network_agent/agent.py`](./network_agent/agent.py) | Why This Small Addition Was Needed for Agent Gateway |
+| Study Note Tag | Exact Lines in [`network_agent/agent.py`](./network_agent/agent.py) | Why This Small Addition Was Needed for Agent Gateway |
 | :--- | :--- | :--- |
-| **`[AGENT GATEWAY STUDY NOTE 1 - Egress TLS Inspection Trust]`** | **Lines 96–106** | When `network_agent` runs on Agent Platform bound to an **Egress Agent Gateway (`AGENT_TO_ANYWHERE`)**, the gateway acts as a forward TLS-inspecting proxy (Secure Web Gateway under the hood) and injects a Google-managed Root CA into the container's OS trust store (`/etc/ssl/certs/ca-certificates.crt`). By default, Python's `httpx` library ignores the OS trust store and uses its own bundled `certifi` package, which would fail with `SSL: CERTIFICATE_VERIFY_FAILED`. Passing `verify="/etc/ssl/certs/ca-certificates.crt"` (when that file exists) tells `httpx` to trust the Egress Agent Gateway's proxy certificate. |
-| **`[AGENT GATEWAY STUDY NOTE 2 - Surfacing Agent Gateway Policy Blocks]`** | **Lines 118–138** | Previously, `RemoteAgentEngineSubAgent` only parsed `HTTP 200` stream lines. When Agent Gateway blocks a call—either with **`HTTP 403 Forbidden`** (Egress IAP v2 UAP Default Deny in Scenario 1) or **`HTTP 403 PERMISSION_DENIED`** (`"Model Armor: Prompt violates content security configurations"` in Scenario 2)—this check surfaces the exact gateway block status and message (`[Agent Gateway Policy Block - HTTP ...]`) directly in the agent's reply so you can observe the policy enforcement clearly. |
-| **`[AGENT GATEWAY STUDY NOTE 3 - Detecting Source-Based Agent Platform Runtime]`** | **Lines 170–174** | When deploying an agent with `identity_type="AGENT_IDENTITY"` and `agent_gateway_config` via `deploy_agent.py`, we pass `RUNNING_ON_AGENT_PLATFORM=true` in `env_vars` so `_is_running_on_agent_platform()` reliably selects `RemoteAgentEngineSubAgent` when `SUBNET_AGENT_TARGET=auto`. |
+| **`[AGENT GATEWAY STUDY NOTE 0 - Parameterized Project, Region & ReasoningEngine ID]`** | **Lines 28–52** *(plus URL/ID builders on **Lines 67–84**)* | Parameterizes `GCP_PROJECT_NUMBER`, `GCP_REGION`, `CLOUD_RUN_REGION`, and `SUBNET_ENGINE_ID` via environment variables (with fallback defaults) so you can re-deploy to a different GCP Project or Region without editing hardcoded resource strings. |
+| **`[AGENT GATEWAY STUDY NOTE 1 - Egress TLS Inspection Trust]`** | **Lines 125–138** | When `network_agent` runs on Agent Platform bound to an **Egress Agent Gateway (`AGENT_TO_ANYWHERE`)**, the gateway acts as a forward TLS-inspecting proxy (Secure Web Gateway under the hood) and injects a Google-managed Root CA into the container's OS trust store (`/etc/ssl/certs/ca-certificates.crt`). By default, Python's `httpx` library ignores the OS trust store and uses its own bundled `certifi` package, which would fail with `SSL: CERTIFICATE_VERIFY_FAILED`. Passing `verify="/etc/ssl/certs/ca-certificates.crt"` (`ca_bundle`) on **Line 138** tells `httpx` to trust the Egress Agent Gateway's proxy certificate. |
+| **`[AGENT GATEWAY STUDY NOTE 2 - Surfacing Agent Gateway Policy Blocks]`** | **Lines 147–168** | Previously, `RemoteAgentEngineSubAgent` only parsed `HTTP 200` stream lines. When Agent Gateway blocks a call—either with **`HTTP 403 Forbidden`** (Egress IAP v2 UAP Default Deny in Scenario 1) or **`HTTP 403 PERMISSION_DENIED`** (`"Model Armor: Prompt violates content security configurations"` in Scenario 2)—this check (`if resp.status_code != 200:` on **Line 151**) surfaces the exact gateway block status and message (`[Agent Gateway Policy Block - HTTP ...]`) directly in the agent's reply so you can observe policy enforcement clearly. |
+| **`[AGENT GATEWAY STUDY NOTE 3 - Detecting Source-Based Agent Platform Runtime]`** | **Lines 199–204** | When deploying an agent with `identity_type="AGENT_IDENTITY"` and `agent_gateway_config` via `deploy_agent.py`, we pass `RUNNING_ON_AGENT_PLATFORM=true` in `env_vars` so `_is_running_on_agent_platform()` (**Lines 202–203**) reliably selects `RemoteAgentEngineSubAgent` when `SUBNET_AGENT_TARGET=auto`. |
+
+#### Verbatim Code Excerpts from [`network_agent/agent.py`](./network_agent/agent.py):
+
+- **Lines 49–52 & 81–84 (`STUDY NOTE 0` — Parameterized Config):**
+  ```python
+  GCP_PROJECT_NUMBER = os.environ.get("GCP_PROJECT_NUMBER", "66063681189")
+  GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
+  CLOUD_RUN_REGION = os.environ.get("CLOUD_RUN_REGION", "asia-southeast2")
+  SUBNET_ENGINE_ID = os.environ.get("SUBNET_ENGINE_ID", "8226712575031640064")
+  ...
+  CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID = os.environ.get(
+      "CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID",
+      f"projects/{GCP_PROJECT_NUMBER}/locations/{GCP_REGION}/reasoningEngines/{SUBNET_ENGINE_ID}",
+  )
+  ```
+- **Lines 125–168 (`STUDY NOTE 1` & `STUDY NOTE 2` inside `RemoteAgentEngineSubAgent._run_async_impl`):**
+  ```python
+          # [AGENT GATEWAY STUDY NOTE 1 - Egress TLS Inspection Trust]:
+          # When `network_agent` runs on Agent Platform bound to an Egress Agent Gateway
+          # (`AGENT_TO_ANYWHERE`), Agent Gateway intercepts outbound HTTPS calls and
+          # injects its Root CA into `/etc/ssl/certs/ca-certificates.crt`.
+          # Because Python's `httpx` defaults to its bundled `certifi` store instead of
+          # the OS CA bundle, we explicitly pass `/etc/ssl/certs/ca-certificates.crt` when present.
+          ca_bundle = (
+              "/etc/ssl/certs/ca-certificates.crt"
+              if os.path.exists("/etc/ssl/certs/ca-certificates.crt")
+              else True
+          )
+
+          final_text = ""
+          async with httpx.AsyncClient(timeout=120.0, verify=ca_bundle) as client:
+              resp = await client.post(
+                  url,
+                  headers={
+                      "Authorization": f"Bearer {creds.token}",
+                      "Content-Type": "application/json",
+                  },
+                  json=payload,
+              )
+              # [AGENT GATEWAY STUDY NOTE 2 - Surfacing Agent Gateway Policy Blocks]:
+              # When Agent Gateway blocks a request (e.g., HTTP 403 Forbidden from IAP v2
+              # Egress policy in Mode 2, or HTTP 400/799 from Model Armor Ingress filter in Mode 3),
+              # we surface the exact gateway block message clearly instead of raising an unhandled exception.
+              if resp.status_code != 200:
+                  final_text = (
+                      f"[Agent Gateway Policy Block - HTTP {resp.status_code}]: "
+                      f"Call to `check_gcp_subnet_ips` was blocked by Agent Gateway: {resp.text}"
+                  )
+              else:
+                  for line in resp.text.splitlines():
+                      line = line.strip()
+                      if not line:
+                          continue
+                      data = json.loads(line)
+                      if "error" in data or "error_message" in data:
+                          err_detail = data.get("error") or data.get("error_message")
+                          final_text = f"[Agent Gateway / Runtime Error]: {json.dumps(err_detail)}"
+                      for p in data.get("content", {}).get("parts", []):
+                          if p.get("text"):
+                              final_text = p["text"]
+  ```
+- **Lines 199–204 (`STUDY NOTE 3` inside `_is_running_on_agent_platform`):**
+  ```python
+      # [AGENT GATEWAY STUDY NOTE 3 - Detecting Source-Based Agent Platform Runtime]:
+      # When deployed with Agent Identity & Agent Gateway via the Vertex AI SDK,
+      # we also check `RUNNING_ON_AGENT_PLATFORM=true` (passed in `env_vars`).
+      if os.environ.get("RUNNING_ON_AGENT_PLATFORM", "").lower() == "true":
+          return True
+      return False
+  ```
 
 ---
 
@@ -158,13 +229,13 @@ sequenceDiagram
 | **Agent Registry** | Core Google APIs Service | `projects/gcp-demo-02-307713/locations/us-central1/services/core-gapi-services`<br>(`endpoints/agentregistry-00000000-0000-0000-444f-0dd5654527c5`) | — |
 | **Agent Registry** | Specialist Agent Entries | Auto-discovered: `agents/agentregistry-00000000-0000-0000-bf2d-ca1285f7103b`<br>Explicit `.mtls` Service: `agents/agentregistry-00000000-0000-0000-f25b-29d92d70d0d5` | — |
 | **Agent Gateway (Egress)** | `agentGateways` (`AGENT_TO_ANYWHERE`) | `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress` | [`cfg/agw-study-egress.yaml`](./cfg/agw-study-egress.yaml) |
-| **Egress IAP v2 Extension** | `authzExtensions` (`iap.googleapis.com`) | `projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-svc-ext-iap` | [`cfg/agw-study-egress-svc-ext-iap.yaml`](./cfg/agw-study-egress-svc-ext-iap.yaml) |
-| **Egress Authz Policy** | `authzPolicies` (`REQUEST_AUTHZ`) | `projects/gcp-demo-02-307713/locations/us-central1/authzPolicies/agw-study-egress-authz-policy-iap` | [`cfg/agw-study-egress-authz-policy-iap.yaml`](./cfg/agw-study-egress-authz-policy-iap.yaml) |
+| **Egress IAP v2 Extension** | `authzExtensions` (`iap.googleapis.com`) | `projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-iap-authzextension` | [`cfg/agw-study-egress-svc-ext-iap.yaml`](./cfg/agw-study-egress-svc-ext-iap.yaml) |
+| **Egress Authz Policy** | `authzPolicies` (`REQUEST_AUTHZ`) | `projects/gcp-demo-02-307713/locations/us-central1/authzPolicies/agw-study-egress-iap-authzpolicy` | [`cfg/agw-study-egress-authz-policy-iap.yaml`](./cfg/agw-study-egress-authz-policy-iap.yaml) |
 | **Unified Access Policy** | `iam.googleapis.com` AccessPolicy | `projects/gcp-demo-02-307713/locations/global/accessPolicies/uap-policy-agw-study-egress`<br>Binding: `policyBindings/uap-binding-agw-study-egress` | [`cfg/uap-rules.json`](./cfg/uap-rules.json)<br>[`cfg/uap-rules-allow-subnet.json`](./cfg/uap-rules-allow-subnet.json) |
 | **Agent Gateway (Ingress)** | `agentGateways` (`CLIENT_TO_AGENT`) | `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress` | [`cfg/agw-study-ingress.yaml`](./cfg/agw-study-ingress.yaml) |
 | **Model Armor Template** | Request & Response Template | `projects/gcp-demo-02-307713/locations/us-central1/templates/agw-study-ingress-modar-req-template` | — |
-| **Ingress Model Armor Ext** | `authzExtensions` (`modelarmor...`) | `projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-svc-ext-modar` | [`cfg/agw-study-ingress-svc-ext-modar.yaml`](./cfg/agw-study-ingress-svc-ext-modar.yaml) |
-| **Ingress Authz Policy** | `authzPolicies` (`CONTENT_AUTHZ`) | `projects/gcp-demo-02-307713/locations/us-central1/authzPolicies/agw-study-ingress-authz-policy-modar` | [`cfg/agw-study-ingress-authz-policy-modar.yaml`](./cfg/agw-study-ingress-authz-policy-modar.yaml) |
+| **Ingress Model Armor Ext** | `authzExtensions` (`modelarmor...`) | `projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-aisecurity-authzextension` | [`cfg/agw-study-ingress-svc-ext-modar.yaml`](./cfg/agw-study-ingress-svc-ext-modar.yaml) |
+| **Ingress Authz Policy** | `authzPolicies` (`CONTENT_AUTHZ`) | `projects/gcp-demo-02-307713/locations/us-central1/authzPolicies/agw-study-ingress-aisecurity-authzpolicy` | [`cfg/agw-study-ingress-authz-policy-modar.yaml`](./cfg/agw-study-ingress-authz-policy-modar.yaml) |
 
 ---
 
@@ -190,7 +261,7 @@ All variables are centralized in **[`cfg/env.sh`](./cfg/env.sh)** (documented in
 | **`SUBNET_ENGINE_ID`** | Obvious (Random per deploy) | Numeric `ReasoningEngine` ID of `check-gcp-subnet-ips-agw`.<br>*Example:* `"8226712575031640064"` | `gcloud alpha ai reasoning-engines list --region=$REGION --project=$PROJECT_ID --filter="displayName=check-gcp-subnet-ips-agw" --format="value(name)" \| awk -F'/' '{print $NF}'` |
 | **`NETWORK_ENGINE_ID`** | Obvious (Random per deploy) | Numeric `ReasoningEngine` ID of `network-agent-agw` (used in UAP Rule 2 SPIFFE Principal).<br>*Example:* `"8162536280341610496"` | `gcloud alpha ai reasoning-engines list --region=$REGION --project=$PROJECT_ID --filter="displayName=network-agent-agw" --format="value(name)" \| awk -F'/' '{print $NF}'` |
 | **`ORG_ID`** | **Hidden** (Inside SPIFFE URIs in `uap-rules*.json`) | Numeric GCP Organization ID in `principal://agents.global.org-<ORG_ID>.system.id.goog/...`. Changes if your new project belongs to a different Organization!<br>*Example:* `"304553879287"` | `gcloud projects get-ancestors $PROJECT_ID --format="value(id)" \| tail -n 1` |
-| **`REGION`** | **Hidden** (Inside Model Armor REP hostname!) | Changes not only resource paths, but also the **Regional Endpoint (REP) hostname** on line 2 of `cfg/agw-study-ingress-svc-ext-modar.yaml`: `service: modelarmor.<REGION>.rep.googleapis.com`.<br>*Example:* `"us-central1"` or `"asia-southeast1"` | N/A |
+| **`REGION`** | **Hidden** (Inside Model Armor REP hostname!) | Changes not only resource paths, but also the **Regional Endpoint (REP) hostname** on **Line 17** of `cfg/agw-study-ingress-svc-ext-modar.yaml`: `service: modelarmor.<REGION>.rep.googleapis.com`.<br>*Example:* `"us-central1"` or `"asia-southeast1"` | N/A |
 | **`CORE_GAPI_ENDPOINT_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 1) | Internal `agentregistry-...` UUID created when you register `core-gapi-services`. IAP v2 evaluates `destination.agent_registry.endpoint.name` against this UUID!<br>*Example:* `"agentregistry-00000000-0000-0000-444f-0dd5654527c5"` | `gcloud alpha agent-registry services describe core-gapi-services --location=$REGION --project=$PROJECT_ID --format="value(registryResource)" \| awk -F'/' '{print $NF}'` |
 | **`SUBNET_AGENT_AUTO_REG_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 2) | Internal `agentregistry-...` UUID auto-created in Agent Registry when `check-gcp-subnet-ips-agw` is deployed on Agent Platform.<br>*Example:* `"agentregistry-00000000-0000-0000-bf2d-ca1285f7103b"` | `gcloud alpha agent-registry agents list --location=$REGION --project=$PROJECT_ID --filter="displayName=check-gcp-subnet-ips-agw" --format="value(name)" \| head -n 1 \| awk -F'/' '{print $NF}'` |
 | **`SUBNET_AGENT_CUSTOM_REG_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 2) | Internal `agentregistry-...` UUID created when you register the custom `.mtls.` service `check-gcp-subnet-ips-agw` in Agent Registry.<br>*Example:* `"agentregistry-00000000-0000-0000-f25b-29d92d70d0d5"` | `gcloud alpha agent-registry services describe check-gcp-subnet-ips-agw --location=$REGION --project=$PROJECT_ID --format="value(registryResource)" \| awk -F'/' '{print $NF}'` |
@@ -203,112 +274,123 @@ All variables are centralized in **[`cfg/env.sh`](./cfg/env.sh)** (documented in
 ### Step 1: Register Core Google APIs & Target Agent in Agent Registry
 When an agent uses an Egress Agent Gateway (`AGENT_TO_ANYWHERE`), its outbound calls to Vertex AI (`aiplatform.googleapis.com`), Cloud Logging, and Telemetry pass through the gateway. Notice that the gateway's internal Envoy proxy rewrites Google API endpoints to `.mtls.googleapis.com`, so you should include both standard and `.mtls.` URLs!
 
+- **Using Google Cloud Console UI:**
+  1. Open **Agent Platform $\rightarrow$ Agents $\rightarrow$ Agent Registry** in Google Cloud Console.
+  2. Select region **`us-central1`**. You will see both auto-discovered agents (`check-gcp-subnet-ips-agw`, `network-agent-agw`) and custom registered services (`core-gapi-services`).
+  3. Click **Register Service** (under Services) to add custom endpoints or external MCP servers.
 - **Using `gcloud` CLI:**
   ```bash
+  source cfg/env.sh
+
   # 1a. Register Core Google APIs
   gcloud alpha agent-registry services create core-gapi-services \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713 \
+    --location="${REGION}" \
+    --project="${PROJECT_ID}" \
     --display-name="Core Google APIs for Agent Runtime" \
     --description="Allows Agent Runtime to reach Vertex AI, Logging, Monitoring, and Telemetry APIs" \
     --endpoint-spec='{"interfaces":[{"url":"https://aiplatform.googleapis.com","protocolBinding":"REST"},{"url":"https://us-central1-aiplatform.googleapis.com","protocolBinding":"REST"},{"url":"https://us-central1-aiplatform.mtls.googleapis.com","protocolBinding":"REST"},{"url":"https://logging.googleapis.com","protocolBinding":"GRPC"},{"url":"https://logging.mtls.googleapis.com","protocolBinding":"GRPC"},{"url":"https://monitoring.googleapis.com","protocolBinding":"GRPC"},{"url":"https://telemetry.googleapis.com","protocolBinding":"GRPC"},{"url":"https://cloudtrace.googleapis.com","protocolBinding":"GRPC"}]}'
 
   # 1b. Register Target Specialist Agent (with both standard and .mtls. streamQuery URLs)
   gcloud alpha agent-registry services create check-gcp-subnet-ips-agw \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713 \
+    --location="${REGION}" \
+    --project="${PROJECT_ID}" \
     --display-name="check-gcp-subnet-ips-agw" \
-    --agent-spec='{"type":"CUSTOM","protocols":[{"type":"CUSTOM","interfaces":[{"url":"https://us-central1-aiplatform.googleapis.com/v1beta1/projects/66063681189/locations/us-central1/reasoningEngines/8226712575031640064:streamQuery","protocolBinding":"HTTP_JSON"},{"url":"https://us-central1-aiplatform.mtls.googleapis.com/v1beta1/projects/66063681189/locations/us-central1/reasoningEngines/8226712575031640064:streamQuery","protocolBinding":"HTTP_JSON"}]}]}'
+    --agent-spec="{\"type\":\"CUSTOM\",\"protocols\":[{\"type\":\"CUSTOM\",\"interfaces\":[{\"url\":\"https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}:streamQuery\",\"protocolBinding\":\"HTTP_JSON\"},{\"url\":\"https://${REGION}-aiplatform.mtls.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}:streamQuery\",\"protocolBinding\":\"HTTP_JSON\"}]}]}"
   ```
-- **Using Google Cloud Console UI:**
-  1. Open **Agent Registry** in Google Cloud Console (`Vertex AI` $\rightarrow$ `Agent Registry` or search **Agent Registry**).
-  2. Select region **`us-central1`**. You will see both auto-discovered agents (`check-gcp-subnet-ips-agw`, `network-agent-agw`) and custom registered services (`core-gapi-services`).
-  3. Click **Register Service** to add custom endpoints or external MCP servers.
 
 ---
 
 ### Step 2: Create the Egress Agent Gateway (`AGENT_TO_ANYWHERE`) & Ingress Agent Gateway (`CLIENT_TO_AGENT`)
 
+- **Using Google Cloud Console UI (Preferred):**
+  1. Navigate to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways** in the Google Cloud Console.
+  2. Click **Create Gateway**:
+     - **For Egress:** Name `agw-study-egress`, Region `us-central1`, Governed access path **Agent-to-Anywhere (egress)**, and link the `us-central1` and `global` Agent Registries.
+     - **For Ingress:** Name `agw-study-ingress`, Region `us-central1`, Governed access path **Client-to-Agent (ingress)**.
 - **Using `gcloud` CLI:**
   ```bash
+  source cfg/env.sh
+
   # 2a. Create Egress Agent Gateway (AGENT_TO_ANYWHERE)
-  gcloud alpha network-services agent-gateways import agw-study-egress \
+  gcloud alpha network-services agent-gateways import "${AGW_EGRESS_NAME}" \
     --source=cfg/agw-study-egress.yaml \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713
+    --location="${REGION}" \
+    --project="${PROJECT_ID}"
 
   # 2b. Create Ingress Agent Gateway (CLIENT_TO_AGENT)
-  gcloud alpha network-services agent-gateways import agw-study-ingress \
+  gcloud alpha network-services agent-gateways import "${AGW_INGRESS_NAME}" \
     --source=cfg/agw-study-ingress.yaml \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713
+    --location="${REGION}" \
+    --project="${PROJECT_ID}"
 
   # 2c. Inspect the generated Agent Gateway Card (Service Attachment & Service Extension SA)
-  gcloud alpha network-services agent-gateways describe agw-study-egress \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713
+  gcloud alpha network-services agent-gateways describe "${AGW_EGRESS_NAME}" \
+    --location="${REGION}" \
+    --project="${PROJECT_ID}"
   ```
-- **Using Google Cloud Console UI:**
-  1. Navigate to **Network Services** $\rightarrow$ **Agent Gateways** in the Google Cloud Console.
-  2. Click **Create Agent Gateway**:
-     - **For Egress:** Name `agw-study-egress`, Region `us-central1`, Deployment Mode **Google-managed**, Governance Type **Agent to Anywhere (Egress)**, Protocol **MCP**, and link the `us-central1` and `global` Agent Registries.
-     - **For Ingress:** Name `agw-study-ingress`, Region `us-central1`, Deployment Mode **Google-managed**, Governance Type **Client to Agent (Ingress)**, Protocol **MCP**.
 
 ---
 
 ### Step 3: Attach IAP v2 Unified Access Policy to the Egress Gateway (Scenario 1)
 
+- **Using Google Cloud Console UI:**
+  1. In **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways $\rightarrow$ `agw-study-egress`**, enable **Access authorization** with **Unified Access Policy**. *(The UI automatically creates `agw-study-egress-iap-authzextension` and `agw-study-egress-iap-authzpolicy`.)*
+  2. Navigate to **IAM & Admin $\rightarrow$ Access Policies (Unified Access Policy)** to view `uap-policy-agw-study-egress` and its CEL destination expressions targeting Agent Registry resources.
 - **Using `gcloud` CLI:**
   ```bash
-  # 3a. Create the IAP v2 AuthzExtension
-  gcloud beta service-extensions authz-extensions import agw-study-egress-svc-ext-iap \
-    --source=cfg/agw-study-egress-svc-ext-iap.yaml \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713
+  source cfg/env.sh
 
-  # 3b. Bind the AuthzExtension to agw-study-egress via an AuthzPolicy (REQUEST_AUTHZ)
-  gcloud beta network-security authz-policies import agw-study-egress-authz-policy-iap \
+  # 3a. Create the IAP v2 AuthzExtension (UI-compatible name: agw-study-egress-iap-authzextension)
+  gcloud beta service-extensions authz-extensions import "${AGW_EGRESS_EXT_NAME}" \
+    --source=cfg/agw-study-egress-svc-ext-iap.yaml \
+    --location="${REGION}" \
+    --project="${PROJECT_ID}"
+
+  # 3b. Bind the AuthzExtension to agw-study-egress via an AuthzPolicy (UI-compatible name: agw-study-egress-iap-authzpolicy)
+  gcloud beta network-security authz-policies import "${AGW_EGRESS_POLICY_NAME}" \
     --source=cfg/agw-study-egress-authz-policy-iap.yaml \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713
+    --location="${REGION}" \
+    --project="${PROJECT_ID}"
 
   # 3c. Create & Bind the Unified Access Policy (UAP)
   # Start with Rule 1 only (cfg/uap-rules.json) to test Default Deny (403 Forbidden),
   # or apply Rule 1 + Rule 2 (cfg/uap-rules-allow-subnet.json) to allow network-agent-agw -> check-gcp-subnet-ips-agw:
-  gcloud iam access-policies create uap-policy-agw-study-egress \
+  gcloud iam access-policies create "${UAP_POLICY_NAME}" \
     --details-rules=cfg/uap-rules.json \
-    --project=gcp-demo-02-307713 \
+    --project="${PROJECT_ID}" \
     --location=global
 
-  gcloud iam policy-bindings create uap-binding-agw-study-egress \
-    --policy="projects/gcp-demo-02-307713/locations/global/accessPolicies/uap-policy-agw-study-egress" \
-    --target-resource="//cloudresourcemanager.googleapis.com/projects/gcp-demo-02-307713" \
-    --project=gcp-demo-02-307713 \
+  gcloud iam policy-bindings create "${UAP_BINDING_NAME}" \
+    --policy="projects/${PROJECT_ID}/locations/global/accessPolicies/${UAP_POLICY_NAME}" \
+    --target-resource="//cloudresourcemanager.googleapis.com/projects/${PROJECT_ID}" \
+    --project="${PROJECT_ID}" \
     --location=global
 
   # 3d. Update UAP Policy to add Rule 2 (Allow ONLY network-agent-agw SPIFFE ID to call check-gcp-subnet-ips-agw)
-  ETAG=$(gcloud iam access-policies describe uap-policy-agw-study-egress \
-    --project=gcp-demo-02-307713 --location=global --format="value(etag)")
-  gcloud iam access-policies update uap-policy-agw-study-egress \
+  ETAG=$(gcloud iam access-policies describe "${UAP_POLICY_NAME}" \
+    --project="${PROJECT_ID}" --location=global --format="value(etag)")
+  gcloud iam access-policies update "${UAP_POLICY_NAME}" \
     --details-rules=cfg/uap-rules-allow-subnet.json \
     --etag="${ETAG}" \
-    --project=gcp-demo-02-307713 \
+    --project="${PROJECT_ID}" \
     --location=global
   ```
-- **Using Google Cloud Console UI:**
-  1. Navigate to **Network Security** $\rightarrow$ **Authz Policies** (`us-central1`) to inspect `agw-study-egress-authz-policy-iap` (`REQUEST_AUTHZ`) targeting `agw-study-egress`.
-  2. Navigate to **IAM & Admin** $\rightarrow$ **Access Policies (Unified Access Policy)** to view `uap-policy-agw-study-egress` and its CEL destination expressions targeting Agent Registry resources.
 
 ---
 
 ### Step 4: Attach Model Armor Content Inspection to the Ingress Gateway (Scenario 2)
 
+- **Using Google Cloud Console UI:**
+  1. Navigate to **Security $\rightarrow$ Model Armor $\rightarrow$ Templates** (`us-central1`) and create/verify `agw-study-ingress-modar-req-template` with **Prompt injection and jailbreak detection** (`Low and above`), **Responsible AI filters**, and Enforcement Mode (**Inspect and block**).
+  2. Navigate to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways $\rightarrow$ `agw-study-ingress`** and enable **AI Security** pointing to `agw-study-ingress-modar-req-template`. *(The UI automatically creates `agw-study-ingress-aisecurity-authzextension` and `agw-study-ingress-aisecurity-authzpolicy`.)*
 - **Using `gcloud` CLI:**
   ```bash
+  source cfg/env.sh
+
   # 4a. Create Model Armor Template (Blocking Prompt Injection, Jailbreaks & Unsafe Content)
-  gcloud model-armor templates create agw-study-ingress-modar-req-template \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713 \
+  gcloud model-armor templates create "${MODEL_ARMOR_TEMPLATE_ID}" \
+    --location="${REGION}" \
+    --project="${PROJECT_ID}" \
     --pi-and-jailbreak-filter-settings-enforcement=ENABLED \
     --pi-and-jailbreak-filter-settings-confidence-level=LOW_AND_ABOVE \
     --template-metadata-enforcement-type=INSPECT_AND_BLOCK \
@@ -316,25 +398,22 @@ When an agent uses an Egress Agent Gateway (`AGENT_TO_ANYWHERE`), its outbound c
     --template-metadata-custom-prompt-safety-error-message="Blocked by Agent Gateway Model Armor: Prompt Injection / Unsafe Input Detected"
 
   # 4b. Grant the Agent Gateway Service Extensions Service Account permission to call Model Armor
-  gcloud projects add-iam-policy-binding gcp-demo-02-307713 \
-    --member="serviceAccount:service-66063681189@gcp-sa-dep.iam.gserviceaccount.com" \
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-dep.iam.gserviceaccount.com" \
     --role="roles/modelarmor.user"
 
-  # 4c. Import the Model Armor AuthzExtension (must include forwardHeaders: ["authorization"]) and AuthzPolicy (CONTENT_AUTHZ)
-  gcloud beta service-extensions authz-extensions import agw-study-ingress-svc-ext-modar \
+  # 4c. Import the Model Armor AuthzExtension (UI-compatible name: agw-study-ingress-aisecurity-authzextension)
+  #     and AuthzPolicy (UI-compatible name: agw-study-ingress-aisecurity-authzpolicy)
+  gcloud beta service-extensions authz-extensions import "${AGW_INGRESS_EXT_NAME}" \
     --source=cfg/agw-study-ingress-svc-ext-modar.yaml \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713
+    --location="${REGION}" \
+    --project="${PROJECT_ID}"
 
-  gcloud beta network-security authz-policies import agw-study-ingress-authz-policy-modar \
+  gcloud beta network-security authz-policies import "${AGW_INGRESS_POLICY_NAME}" \
     --source=cfg/agw-study-ingress-authz-policy-modar.yaml \
-    --location=us-central1 \
-    --project=gcp-demo-02-307713
+    --location="${REGION}" \
+    --project="${PROJECT_ID}"
   ```
-- **Using Google Cloud Console UI:**
-  1. Navigate to **Security** $\rightarrow$ **Model Armor** $\rightarrow$ **Templates** (`us-central1`).
-  2. Click `agw-study-ingress-modar-req-template` to verify **Prompt injection and jailbreak detection** (`LOW_AND_ABOVE`), **Responsible AI filters**, and Enforcement Mode (**Inspect and block**).
-  3. Navigate to **Network Security** $\rightarrow$ **Authz Policies** (`us-central1`) to inspect `agw-study-ingress-authz-policy-modar` (`CONTENT_AUTHZ`) bound to `agw-study-ingress`.
 
 ---
 
