@@ -434,7 +434,17 @@ python3 deploy_agent.py \
 ./render_configs.sh --auto-discover
 source cfg/env.sh
 
-# 2e. Update Cloud Run network-agent-agw (Mode 3 Web UI in asia-southeast2) with the new SUBNET_ENGINE_ID
+# 2e. Deploy (if deleted) and Update Cloud Run network-agent-agw (Mode 3 Web UI in asia-southeast2) with the new SUBNET_ENGINE_ID
+if ! gcloud run services describe network-agent-agw --project="${PROJECT_ID}" --region="${CLOUD_RUN_REGION}" >/dev/null 2>&1; then
+  adk deploy cloud_run \
+    --project="${PROJECT_ID}" \
+    --region="${CLOUD_RUN_REGION}" \
+    --service_name=network-agent-agw \
+    --app_name=network_agent \
+    --with_ui \
+    ./network_agent
+fi
+
 gcloud run services update network-agent-agw \
   --project="${PROJECT_ID}" \
   --region="${CLOUD_RUN_REGION}" \
