@@ -225,14 +225,45 @@ To preserve continuity with `simple-agent-02`, **zero functional changes** were 
 
 ---
 
-## 4. Quick Traffic Validation Commands (Works From Scratch via `cfg/env.sh`)
+## 4. "Before vs. After" Traffic Validation & 30-Second Live Toggle Commands
+
+### 4.0 Instant 30-Second Live Toggle (`BEFORE` vs. `AFTER` Agent Gateway Without Redeploying Agents!)
+If you already have the stack deployed and want to test **Before vs. After** right now without re-deploying your agents:
+
+```bash
+cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
+
+# 🔴 1. Switch to "BEFORE INGRESS GATEWAY" State (Unbind agw-study-ingress in ~30s):
+curl -s -X PATCH \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" \
+  -d '{"spec":{"deploymentSpec":{"agentGatewayConfig":{}}}}'
+# -> Wait ~30s, then run Test 1B below: the attack prompt PASSES THROUGH (HTTP 200 OK)!
+
+# 🟢 2. Switch back to "AFTER INGRESS GATEWAY" State (Re-bind agw-study-ingress in ~30s):
+curl -s -X PATCH \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" \
+  -d "{\"spec\":{\"deploymentSpec\":{\"agentGatewayConfig\":{\"clientToAgentConfig\":{\"agentGateway\":\"projects/${PROJECT_ID}/locations/${REGION}/agentGateways/${AGW_INGRESS_NAME}\"}}}}}"
+# -> Wait ~30s, then run Test 1B below: the attack prompt is BLOCKED AT THE EDGE (HTTP 403 PERMISSION_DENIED)!
+
+# 🔴 3. Switch Egress UAP to "BEFORE RULE 2 (Default Deny)" State (Rule 1 only -> cfg/uap-rules.json):
+ETAG=$(gcloud iam access-policies describe "projects/${PROJECT_ID}/locations/global/accessPolicies/${UAP_POLICY_NAME}" --format="value(etag)")
+gcloud iam access-policies update "projects/${PROJECT_ID}/locations/global/accessPolicies/${UAP_POLICY_NAME}" --details-rules=cfg/uap-rules.json --etag="${ETAG}"
+
+# 🟢 4. Switch Egress UAP to "AFTER RULE 2 (Explicit SPIFFE Allow)" State (Rule 1 + Rule 2 -> cfg/uap-rules-allow-subnet.json):
+ETAG=$(gcloud iam access-policies describe "projects/${PROJECT_ID}/locations/global/accessPolicies/${UAP_POLICY_NAME}" --format="value(etag)")
+gcloud iam access-policies update "projects/${PROJECT_ID}/locations/global/accessPolicies/${UAP_POLICY_NAME}" --details-rules=cfg/uap-rules-allow-subnet.json --etag="${ETAG}"
+```
 
 ### 4.1 Test Mode 2 (`network-agent-agw` on Agent Platform $\rightarrow$ `check-gcp-subnet-ips-agw` on Agent Platform)
 
 ```bash
 cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 
-# Test 1A: Benign Subnet Query (Passes Agent Gateway Model Armor -> HTTP 200 OK)
+# Test 1A: Benign Subnet Query (Passes both Before & After Agent Gateway -> HTTP 200 OK)
 curl -s -X POST \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   -H "Content-Type: application/json" \
@@ -245,7 +276,9 @@ curl -s -X POST \
     }
   }'
 
-# Test 1B: Prompt Injection / Unsafe Query (Blocked at Agent Gateway Edge -> HTTP 403 PERMISSION_DENIED)
+# Test 1B: Prompt Injection / Unsafe Query
+#   - BEFORE Ingress Gateway: Passes straight through (HTTP 200 OK) and executes subnet tool!
+#   - AFTER Ingress Gateway:  Blocked at Agent Gateway Edge -> HTTP 403 PERMISSION_DENIED ("Model Armor: Prompt violates content security configurations")
 curl -s -X POST \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   -H "Content-Type: application/json" \
@@ -284,7 +317,9 @@ curl -s -X POST "${CLOUD_RUN_URL}/run" \
     }
   }'
 
-# 3. Send a Prompt Injection / Unsafe Query (Blocked by Agent Gateway Model Armor -> HTTP 403 PERMISSION_DENIED)
+# 3. Send a Prompt Injection / Unsafe Query
+#    - BEFORE Ingress Gateway: HTTP 200 OK (Unprotected — reaches sub-agent)
+#    - AFTER Ingress Gateway:  Blocked by Agent Gateway Model Armor -> HTTP 403 PERMISSION_DENIED
 curl -s -X POST "${CLOUD_RUN_URL}/run" \
   -H "Content-Type: application/json" \
   -d '{
