@@ -213,25 +213,27 @@ To preserve continuity with `simple-agent-02`, **zero functional changes** were 
 
 | Component | Region | Live Resource Name / URL / SPIFFE Identity |
 | :--- | :--- | :--- |
-| **`check-gcp-subnet-ips-agw`** (Specialist Agent on Agent Platform) | `us-central1` | **ReasoningEngine:** `projects/66063681189/locations/us-central1/reasoningEngines/8226712575031640064`<br>**Effective SPIFFE Identity (`AGENT_IDENTITY`):**<br>`principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/8226712575031640064`<br>**Bound Ingress Gateway:** `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress` |
-| **`network-agent-agw`** (Mode 2 Orchestrator on Agent Platform) | `us-central1` | **ReasoningEngine:** `projects/66063681189/locations/us-central1/reasoningEngines/8162536280341610496`<br>**Effective SPIFFE Identity (`AGENT_IDENTITY`):**<br>`principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/8162536280341610496` |
-| **`network-agent-agw`** (Mode 3 Orchestrator on Cloud Run with Web UI) | `asia-southeast2` | **Cloud Run URL:** `https://network-agent-agw-66063681189.asia-southeast2.run.app`<br>**Target Sub-Agent:** `projects/66063681189/locations/us-central1/reasoningEngines/8226712575031640064` |
+| **`check-gcp-subnet-ips-agw`** (Specialist Agent on Agent Platform) | `us-central1` | **ReasoningEngine:** `projects/66063681189/locations/us-central1/reasoningEngines/1020302260355203072` (`${SUBNET_ENGINE_ID}`)<br>**Effective SPIFFE Identity (`AGENT_IDENTITY`):**<br>`principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/1020302260355203072`<br>**Bound Ingress Gateway:** `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress` |
+| **`network-agent-agw`** (Mode 2 Orchestrator on Agent Platform) | `us-central1` | **ReasoningEngine:** `projects/66063681189/locations/us-central1/reasoningEngines/1179054147220013056` (`${NETWORK_ENGINE_ID}`)<br>**Effective SPIFFE Identity (`AGENT_IDENTITY`):**<br>`principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/1179054147220013056` |
+| **`network-agent-agw`** (Mode 3 Orchestrator on Cloud Run with Web UI) | `asia-southeast2` | **Cloud Run URL:** `https://network-agent-agw-66063681189.asia-southeast2.run.app`<br>**Target Sub-Agent:** `projects/66063681189/locations/us-central1/reasoningEngines/${SUBNET_ENGINE_ID}` |
 | **Ingress Agent Gateway (`CLIENT_TO_AGENT`) + Model Armor (`CONTENT_AUTHZ`)** | `us-central1` | **Gateway:** `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress`<br>**AuthzPolicy (UI-compatible name):** `projects/gcp-demo-02-307713/locations/us-central1/authzPolicies/agw-study-ingress-aisecurity-authzpolicy`<br>**AuthzExtension (UI-compatible name):** `projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-aisecurity-authzextension`<br>**Model Armor Template:** `projects/gcp-demo-02-307713/locations/us-central1/templates/agw-study-ingress-modar-req-template` |
 | **Egress Agent Gateway (`AGENT_TO_ANYWHERE`) + IAP v2 UAP (`REQUEST_AUTHZ`)** | `us-central1` / `global` | **Gateway:** `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress`<br>**AuthzPolicy (UI-compatible name):** `projects/gcp-demo-02-307713/locations/us-central1/authzPolicies/agw-study-egress-iap-authzpolicy`<br>**AuthzExtension (UI-compatible name):** `projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-iap-authzextension`<br>**UAP AccessPolicy:** `projects/gcp-demo-02-307713/locations/global/accessPolicies/uap-policy-agw-study-egress`<br>**UAP PolicyBinding:** `projects/gcp-demo-02-307713/locations/global/policyBindings/uap-binding-agw-study-egress` |
-| **Agent Registry Entries** | `us-central1` | **Auto-discovered `check-gcp-subnet-ips-agw`:** `agentregistry-00000000-0000-0000-bf2d-ca1285f7103b`<br>**Auto-discovered `network-agent-agw`:** `agentregistry-00000000-0000-0000-24cf-84375b7feb1e`<br>**Custom Service `check-gcp-subnet-ips-agw`:** `agentregistry-00000000-0000-0000-f25b-29d92d70d0d5`<br>**Custom Service `core-gapi-services`:** `agentregistry-00000000-0000-0000-444f-0dd5654527c5` |
+| **Agent Registry Entries** | `us-central1` | **Auto-discovered `check-gcp-subnet-ips-agw`:** `${SUBNET_AGENT_AUTO_REG_ID}`<br>**Custom Service `check-gcp-subnet-ips-agw`:** `${SUBNET_AGENT_CUSTOM_REG_ID}`<br>**Custom Service `core-gapi-services`:** `${CORE_GAPI_ENDPOINT_ID}` |
 
 ---
 
-## 4. Quick Traffic Validation Commands
+## 4. Quick Traffic Validation Commands (Works From Scratch via `cfg/env.sh`)
 
 ### 4.1 Test Mode 2 (`network-agent-agw` on Agent Platform $\rightarrow$ `check-gcp-subnet-ips-agw` on Agent Platform)
 
 ```bash
+cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
+
 # Test 1A: Benign Subnet Query (Passes Agent Gateway Model Armor -> HTTP 200 OK)
 curl -s -X POST \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   -H "Content-Type: application/json" \
-  "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/66063681189/locations/us-central1/reasoningEngines/8162536280341610496:streamQuery" \
+  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}:streamQuery" \
   -d '{
     "class_method": "stream_query",
     "input": {
@@ -244,7 +246,7 @@ curl -s -X POST \
 curl -s -X POST \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   -H "Content-Type: application/json" \
-  "https://us-central1-aiplatform.googleapis.com/v1beta1/projects/66063681189/locations/us-central1/reasoningEngines/8162536280341610496:streamQuery" \
+  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}:streamQuery" \
   -d '{
     "class_method": "stream_query",
     "input": {
@@ -259,7 +261,8 @@ curl -s -X POST \
 You can test Mode 3 directly in your browser using the ADK Web UI at **`https://network-agent-agw-66063681189.asia-southeast2.run.app`**, or via `curl`:
 
 ```bash
-CLOUD_RUN_URL="https://network-agent-agw-66063681189.asia-southeast2.run.app"
+cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
+CLOUD_RUN_URL=$(gcloud run services describe network-agent-agw --project="${PROJECT_ID}" --region="${CLOUD_RUN_REGION}" --format="value(status.url)")
 
 # 1. Create a session on Cloud Run network-agent-agw
 curl -s -X POST "${CLOUD_RUN_URL}/apps/network_agent/users/indra/sessions/session-mode3-test" \

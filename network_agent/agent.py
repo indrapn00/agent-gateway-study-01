@@ -49,7 +49,7 @@ os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 GCP_PROJECT_NUMBER = os.environ.get("GCP_PROJECT_NUMBER", "66063681189")
 GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
 CLOUD_RUN_REGION = os.environ.get("CLOUD_RUN_REGION", "asia-southeast2")
-SUBNET_ENGINE_ID = os.environ.get("SUBNET_ENGINE_ID", "8226712575031640064")
+SUBNET_ENGINE_ID = os.environ.get("SUBNET_ENGINE_ID", "1020302260355203072")
 
 # Supported values for `SUBNET_AGENT_TARGET`:
 #   - "auto":

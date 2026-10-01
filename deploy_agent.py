@@ -56,6 +56,29 @@ EXPOSE 8080
 CMD adk api_server --port=8080 --host=0.0.0.0 --session_service_uri=agentengine://{resource_name} --memory_service_uri=agentengine://{resource_name} --otel_to_cloud --a2a --gemini_enterprise_app_name={app_name} "/app/agents"
 """
 
+CLOUD_RUN_DOCKERFILE_TEMPLATE = """FROM python:3.11-slim
+WORKDIR /app
+
+RUN adduser --disabled-password --gecos "" myuser
+USER myuser
+
+ENV PATH="/home/myuser/.local/bin:$PATH"
+ENV GOOGLE_CLOUD_PROJECT={project}
+ENV GOOGLE_CLOUD_LOCATION=global
+ENV GOOGLE_GENAI_USE_VERTEXAI=TRUE
+ENV RUNNING_ON_AGENT_PLATFORM=false
+{extra_env_lines}
+
+RUN pip install --no-cache-dir "google-adk[a2a]==2.9.1" "a2a-sdk[http-server]==1.1.2" "sse-starlette==3.4.11"
+
+COPY --chown=myuser:myuser "agents/{app_name}/" "/app/agents/{app_name}/"
+RUN pip install --no-cache-dir -r "/app/agents/{app_name}/requirements.txt"
+
+EXPOSE 8080
+
+CMD adk web --port=8080 --host=0.0.0.0 --a2a "/app/agents"
+"""
+
 
 def get_auth_headers() -> dict[str, str]:
     creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
@@ -110,10 +133,10 @@ def patch_agent_gateway_config(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Deploy ADK Agent to Vertex AI Agent Engine with Agent Identity and Agent Gateway"
+        description="Deploy ADK Agent to Vertex AI Agent Engine or Cloud Run with Agent Identity and Agent Gateway"
     )
     parser.add_argument("--project", required=True, help="Google Cloud Project ID")
-    parser.add_argument("--region", default="us-central1", help="Vertex AI Region")
+    parser.add_argument("--region", default="us-central1", help="Vertex AI or Cloud Run Region")
     parser.add_argument(
         "--src-dir",
         help="Directory containing agent code (must contain agent.py)",
@@ -169,6 +192,10 @@ def main():
         help="Only PATCH spec.deploymentSpec.agentGatewayConfig on --update-existing without rebuilding",
     )
     parser.add_argument(
+        "--cloud-run-service",
+        help="Deploy to Cloud Run (with ADK Web UI + A2A) under this service name instead of Vertex AI Agent Engine",
+    )
+    parser.add_argument(
         "-e",
         "--env-var",
         action="append",
@@ -195,6 +222,67 @@ def main():
     if not args.src_dir:
         raise ValueError("--src-dir is required unless --bind-gateway-only is set")
 
+    src_abs_path = os.path.abspath(args.src_dir)
+    app_name = os.path.basename(os.path.normpath(src_abs_path))
+
+    if args.cloud_run_service:
+        import subprocess
+        staging_dir = tempfile.mkdtemp(prefix="cloudrun_deploy_")
+        original_cwd = os.getcwd()
+        try:
+            agent_dest = os.path.join(staging_dir, "agents", app_name)
+            os.makedirs(os.path.dirname(agent_dest), exist_ok=True)
+            print(f"Staging Cloud Run agent code from {src_abs_path} to {agent_dest}...")
+            shutil.copytree(
+                src_abs_path,
+                agent_dest,
+                ignore=shutil.ignore_patterns(
+                    "__pycache__", "*.pyc", ".pytest_cache", ".venv", "Dockerfile", ".dockerignore"
+                ),
+            )
+            env_vars = {
+                "GOOGLE_GENAI_USE_VERTEXAI": "TRUE",
+                "GOOGLE_CLOUD_LOCATION": "global",
+                "RUNNING_ON_AGENT_PLATFORM": "false",
+            }
+            if args.env_var:
+                for item in args.env_var:
+                    if "=" in item:
+                        k, v = item.split("=", 1)
+                        env_vars[k.strip()] = v.strip()
+
+            extra_env_lines = "\n".join(f'ENV {k}="{v}"' for k, v in env_vars.items())
+            dockerfile_path = os.path.join(staging_dir, "Dockerfile")
+            with open(dockerfile_path, "w", encoding="utf-8") as f:
+                f.write(
+                    CLOUD_RUN_DOCKERFILE_TEMPLATE.format(
+                        project=args.project,
+                        app_name=app_name,
+                        extra_env_lines=extra_env_lines,
+                    )
+                )
+            env_flag = ",".join(f"{k}={v}" for k, v in env_vars.items())
+            cmd = [
+                "gcloud",
+                "run",
+                "deploy",
+                args.cloud_run_service,
+                f"--source={staging_dir}",
+                f"--project={args.project}",
+                f"--region={args.region}",
+                "--allow-unauthenticated",
+                "--port=8080",
+                f"--set-env-vars={env_flag}",
+                "--quiet",
+            ]
+            print(f"Deploying Cloud Run service '{args.cloud_run_service}' in {args.region}...")
+            subprocess.run(cmd, check=True)
+            print(f"SUCCESS: Cloud Run service '{args.cloud_run_service}' deployed in {args.region}!")
+        finally:
+            os.chdir(original_cwd)
+            shutil.rmtree(staging_dir, ignore_errors=True)
+        return
+
     import vertexai
     from google.adk.cli import cli_deploy
 
@@ -203,9 +291,6 @@ def main():
         location=args.region,
         http_options=dict(api_version="v1beta1"),
     )
-
-    src_abs_path = os.path.abspath(args.src_dir)
-    app_name = os.path.basename(os.path.normpath(src_abs_path))
 
     # 1. Resolve or create the ReasoningEngine resource with AGENT_IDENTITY first
     if args.update_existing:
