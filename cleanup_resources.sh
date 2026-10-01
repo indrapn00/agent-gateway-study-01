@@ -47,15 +47,34 @@ if [[ "${MODE}" == "--include-agents" ]]; then
     --region="${CLOUD_RUN_REGION}" --project="${PROJECT_ID}" --quiet || true
 else
   echo ""
-  echo ">>> [Step 1/6] Skipping ReasoningEngine & Cloud Run deletion (pass --include-agents to delete them)."
-  echo "    Unbinding Ingress Agent Gateway from check-gcp-subnet-ips-agw (${SUBNET_ENGINE_ID}) so Gateway can be deleted..."
+  echo ">>> [Step 1/6] Unbinding Agent Gateways from ReasoningEngine Agents (${SUBNET_ENGINE_ID}, ${NETWORK_ENGINE_ID}) so Gateways can be deleted without deleting the Agents..."
   TOKEN=$(gcloud auth print-access-token 2>/dev/null || true)
-  if [[ -n "${TOKEN}" && -n "${SUBNET_ENGINE_ID:-}" ]]; then
-    curl -s -X PATCH \
-      -H "Authorization: Bearer ${TOKEN}" \
-      -H "Content-Type: application/json" \
-      "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}?updateMask=spec.deploymentSpec.agentGatewayConfig" \
-      -d '{"spec":{"identityType":"AGENT_IDENTITY","deploymentSpec":{"agentGatewayConfig":{}}}}' >/dev/null || true
+  if [[ -n "${TOKEN}" ]]; then
+    for ENGINE_ID in "${SUBNET_ENGINE_ID:-}" "${NETWORK_ENGINE_ID:-}"; do
+      if [[ -n "${ENGINE_ID}" ]]; then
+        HasGW=$(curl -s -H "Authorization: Bearer ${TOKEN}" \
+          "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${ENGINE_ID}" \
+          | python3 -c "import sys, json; d=json.load(sys.stdin); cfg=d.get('spec',{}).get('deploymentSpec',{}).get('agentGatewayConfig',{}); print('yes' if cfg else 'no')" 2>/dev/null || echo "no")
+        if [[ "${HasGW}" == "yes" ]]; then
+          echo "    Unbinding AgentGatewayConfig from reasoningEngine/${ENGINE_ID}..."
+          OP_JSON=$(curl -s -X PATCH \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" \
+            -d '{"spec":{"deploymentSpec":{"agentGatewayConfig":{}}}}')
+          OP_NAME=$(echo "${OP_JSON}" | python3 -c "import sys, json; print(json.load(sys.stdin).get('name', ''))" 2>/dev/null || true)
+          if [[ -n "${OP_NAME}" ]]; then
+            echo "    Waiting for unbind operation (${OP_NAME}) to complete..."
+            for _ in {1..40}; do
+              DONE=$(curl -s -H "Authorization: Bearer ${TOKEN}" "https://${REGION}-aiplatform.googleapis.com/v1beta1/${OP_NAME}" \
+                | python3 -c "import sys, json; print(json.load(sys.stdin).get('done', False))" 2>/dev/null || echo "False")
+              [[ "${DONE}" == "True" ]] && break
+              sleep 5
+            done
+          fi
+        fi
+      fi
+    done
   fi
 fi
 
@@ -87,8 +106,8 @@ done
 
 if [[ "${MODE}" == "--policies-only" ]]; then
   echo ""
-  echo "DONE (--policies-only): AuthzPolicies and Service Extensions have been removed!"
-  echo "You can now refresh the Google Cloud Console UI (Agent Platform -> Govern -> Gateways)"
+  echo "DONE (--policies-only): ReasoningEngines unbound, and AuthzPolicies + Service Extensions removed!"
+  echo "You can now refresh the Google Cloud Console UI (Agent Platform -> Agents -> Gateways)"
   echo "and click the 'Delete' button on ${AGW_INGRESS_NAME} and ${AGW_EGRESS_NAME}."
   exit 0
 fi

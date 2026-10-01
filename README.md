@@ -59,19 +59,24 @@ When you move to a **different GCP Project**, **different Organization**, **diff
 
 ## 1.6 Step-by-Step Resource Deletion Guide (Google Cloud Console UI vs. `gcloud`)
 
-Because Agent Gateway resources form a strict dependency chain (`ReasoningEngine` $\rightarrow$ `AuthzPolicy` $\rightarrow$ `AgentGateway` & `AuthzExtension` $\rightarrow$ `Model Armor Template` / `UAP Policy`), **you must delete them in reverse order**:
+Because Agent Gateway resources form a strict dependency chain:
+$$\text{ReasoningEngine Agent} \xrightarrow{\text{uses}} \text{AgentGateway} \xleftarrow{\text{attaches}} \text{AuthzPolicy} \xrightarrow{\text{calls}} \text{AuthzExtension}$$
+**you must remove dependencies before deleting an Agent Gateway**:
 
-1. **Step 1 — Remove `AI Security` / `Access authorization` Policies & Extensions FIRST:**
-   - **In the UI (`Agent Platform` $\rightarrow$ `Govern` $\rightarrow$ `Gateways` $\rightarrow$ `<gateway>`):**
+1. **Step 1 — Unbind or Delete the `ReasoningEngine` Agent that uses the Gateway:**
+   - Why? Just like a VM Instance attached to a VPC Subnet, if an Agent (`8226712575031640064`) still has `spec.deploymentSpec.agentGatewayConfig` pointing to `agw-study-ingress`, clicking **Delete** on the Gateway fails with:
+     `Resource 'projects/.../agentGateways/agw-study-ingress' is already being used by resource(s) '//aiplatform.googleapis.com/projects/.../reasoningEngines/8226712575031640064'`
+   - **Option A (100% UI — if deleting the Agent too):** Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Agent Engine** (`us-central1`) and delete `check-gcp-subnet-ips-agw` (and `network-agent-agw`). *Deleting the Agent does **not** stall the Gateway—Vertex AI's delete pipeline automatically deprovisions the binding and releases the lock on the Gateway!*
+   - **Option B (Keep the Agent alive, unbind the Gateway only):** Because the Agent Engine UI (`Deployment details` tab) displays `Ingress` and `Egress` gateway bindings as read-only fields, run `./cleanup_resources.sh --policies-only` (which patches `spec.deploymentSpec.agentGatewayConfig: {}` and waits for the unbind operation to finish).
+2. **Step 2 — Remove `AI Security` / `Access authorization` Policies & Extensions:**
+   - **In the UI (`Agent Platform` $\rightarrow$ `Agents` $\rightarrow$ `Gateways` $\rightarrow$ `<gateway>`):**
      Click **`Remove`** on the **AI Security** card (for `agw-study-ingress`) or the **Access authorization** card (for `agw-study-egress`).
      *(Note: The Cloud Console UI only shows the `Remove` button if the `AuthzPolicy` is named `<gateway>-aisecurity-authzpolicy` or `<gateway>-iap-authzpolicy`, which is now the default in [`cfg/env.sh`](./cfg/env.sh)! If a policy was created via CLI with a custom name, run `./cleanup_resources.sh --policies-only` to remove it.)*
-2. **Step 2 — Delete the Agent Gateways (`agw-study-ingress`, `agw-study-egress`):**
-   - **In the UI (`Agent Platform` $\rightarrow$ `Govern` $\rightarrow$ `Gateways`):** Once the associated policies/extensions are removed, the top-right **`Delete`** button on the Gateway becomes active! Click **`Delete`**.
-3. **Step 3 — Delete the Model Armor Template & Custom Agent Registry Services:**
+3. **Step 3 — Delete the Agent Gateways (`agw-study-ingress`, `agw-study-egress`):**
+   - **In the UI (`Agent Platform` $\rightarrow$ `Agents` $\rightarrow$ `Gateways`):** Once Steps 1 & 2 are complete, click **`Delete`** on `agw-study-ingress` and `agw-study-egress`.
+4. **Step 4 — Delete the Model Armor Template, Unified Access Policy & Custom Agent Registry Services:**
    - **Model Armor Template in the UI:** Go to **Security** $\rightarrow$ **Model Armor** $\rightarrow$ **Templates**, select `agw-study-ingress-modar-req-template`, and click **Delete**.
-   - **Agent Registry Services in the UI:** Go to **Agent Platform** $\rightarrow$ **Govern** $\rightarrow$ **Agent Registry** $\rightarrow$ **Services**, and delete `check-gcp-subnet-ips-agw` and `core-gapi-services`.
-4. **Step 4 — Delete Unified Access Policy (`uap-policy-agw-study-egress`) & Agents (if desired):**
-   - **Agents in the UI:** Go to **Agent Platform** $\rightarrow$ **Scale** $\rightarrow$ **Deployments** to delete `check-gcp-subnet-ips-agw` and `network-agent-agw`, or **Cloud Run** to delete `network-agent-agw`.
+   - **Agent Registry Services in the UI:** Go to **Agent Platform** $\rightarrow$ **Agents** $\rightarrow$ **Agent Registry** $\rightarrow$ **Services**, and delete `check-gcp-subnet-ips-agw` and `core-gapi-services`.
    - **Or run [`./cleanup_resources.sh`](./cleanup_resources.sh)** to automate Steps 1–4 (`./cleanup_resources.sh --policies-only`, `./cleanup_resources.sh`, or `./cleanup_resources.sh --include-agents`).
 
 ---
