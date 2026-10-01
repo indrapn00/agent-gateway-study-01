@@ -7,10 +7,10 @@
 #      and AGW_INGRESS_NAME ("agw-study-ingress").
 #      - Example: "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress"
 #   2. `customProvider.authzExtension.resources[0]`: Replace PROJECT_ID ("gcp-demo-02-307713"),
-#      REGION ("us-central1"), and AGW_INGRESS_EXT_NAME ("agw-study-ingress-svc-ext-modar").
+#      REGION ("us-central1"), and AGW_INGRESS_EXT_NAME ("agw-study-ingress-aisecurity-authzextension").
 #      - Example: "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-svc-ext-modar"
 # ==============================================================================
-name: agw-study-ingress-authz-policy-modar
+name: agw-study-ingress-aisecurity-authzpolicy
 target:
   resources:
   - "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress"
@@ -19,4 +19,4 @@ action: CUSTOM
 customProvider:
   authzExtension:
     resources:
-    - "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-svc-ext-modar"
+    - "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-aisecurity-authzextension"

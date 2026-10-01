@@ -13,7 +13,7 @@
 #   3. IAM Requirement in New Project: Grant `roles/modelarmor.user` to your project's
 #      Service Extensions P4SA: `service-<PROJECT_NUMBER>@gcp-sa-dep.iam.gserviceaccount.com`.
 # ==============================================================================
-name: agw-study-ingress-svc-ext-modar
+name: agw-study-ingress-aisecurity-authzextension
 service: modelarmor.us-central1.rep.googleapis.com
 forwardHeaders:
 - authorization

@@ -7,7 +7,7 @@
 #      - Example: "agw-study-egress-svc-ext-iap"
 #   Note: `service: iap.googleapis.com` is global and does NOT change across regions/projects.
 # ==============================================================================
-name: agw-study-egress-svc-ext-iap
+name: agw-study-egress-iap-authzextension
 service: iap.googleapis.com
 failOpen: false
 timeout: 1s

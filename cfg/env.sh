@@ -125,9 +125,13 @@ export SUBNET_AGENT_CUSTOM_REG_ID="${SUBNET_AGENT_CUSTOM_REG_ID:-agentregistry-0
 export AGW_EGRESS_NAME="${AGW_EGRESS_NAME:-agw-study-egress}"
 
 # Egress IAP v2 AuthzExtension & AuthzPolicy names
-#   - Example: "agw-study-egress-svc-ext-iap", "agw-study-egress-authz-policy-iap"
-export AGW_EGRESS_EXT_NAME="${AGW_EGRESS_EXT_NAME:-${AGW_EGRESS_NAME}-svc-ext-iap}"
-export AGW_EGRESS_POLICY_NAME="${AGW_EGRESS_POLICY_NAME:-${AGW_EGRESS_NAME}-authz-policy-iap}"
+#   - IMPORTANT UI COMPATIBILITY RULE:
+#     The Google Cloud Console UI (`Agent Platform -> Govern -> Gateways`) ONLY
+#     displays the "Access authorization" card and its UI "Remove" button if the
+#     AuthzPolicy is named `<AGW_EGRESS_NAME>-iap-authzpolicy` (and Extension is
+#     `<AGW_EGRESS_NAME>-iap-authzextension`).
+export AGW_EGRESS_EXT_NAME="${AGW_EGRESS_EXT_NAME:-${AGW_EGRESS_NAME}-iap-authzextension}"
+export AGW_EGRESS_POLICY_NAME="${AGW_EGRESS_POLICY_NAME:-${AGW_EGRESS_NAME}-iap-authzpolicy}"
 
 # Unified Access Policy (UAP) and PolicyBinding names
 #   - Example: "uap-policy-agw-study-egress", "uap-binding-agw-study-egress"
@@ -139,10 +143,14 @@ export UAP_BINDING_NAME="${UAP_BINDING_NAME:-uap-binding-${AGW_EGRESS_NAME}}"
 export AGW_INGRESS_NAME="${AGW_INGRESS_NAME:-agw-study-ingress}"
 
 # Ingress Model Armor Template, AuthzExtension & AuthzPolicy names
-#   - Example: "agw-study-ingress-modar-req-template"
+#   - IMPORTANT UI COMPATIBILITY RULE:
+#     The Google Cloud Console UI (`Agent Platform -> Govern -> Gateways`) ONLY
+#     displays the "AI Security" card and its UI "Remove" button if the
+#     AuthzPolicy is named `<AGW_INGRESS_NAME>-aisecurity-authzpolicy` (and Extension is
+#     `<AGW_INGRESS_NAME>-aisecurity-authzextension`).
 export MODEL_ARMOR_TEMPLATE_ID="${MODEL_ARMOR_TEMPLATE_ID:-${AGW_INGRESS_NAME}-modar-req-template}"
-export AGW_INGRESS_EXT_NAME="${AGW_INGRESS_EXT_NAME:-${AGW_INGRESS_NAME}-svc-ext-modar}"
-export AGW_INGRESS_POLICY_NAME="${AGW_INGRESS_POLICY_NAME:-${AGW_INGRESS_NAME}-authz-policy-modar}"
+export AGW_INGRESS_EXT_NAME="${AGW_INGRESS_EXT_NAME:-${AGW_INGRESS_NAME}-aisecurity-authzextension}"
+export AGW_INGRESS_POLICY_NAME="${AGW_INGRESS_POLICY_NAME:-${AGW_INGRESS_NAME}-aisecurity-authzpolicy}"
 
 # Cloud Run Base URLs (Used in Mode 1 & Mode 3)
 #   - Example: "https://check-gcp-subnet-ips-66063681189.asia-southeast2.run.app"

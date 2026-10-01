@@ -466,3 +466,60 @@ When an agent uses an Egress Agent Gateway (`AGENT_TO_ANYWHERE`), its outbound c
    - Under the hood, when an Agent Platform `ReasoningEngine` is bound to an Egress Agent Gateway (`AGENT_TO_ANYWHERE`), Vertex AI provisions a custom VPC, catch-all DNS response policy (`*`), PSC endpoint, and wildcard Secure Web Proxy routes (`aersvd-swp-http-route-...`, `aersvd-swp-tcp-route-...`) inside the customer's **single shared regional tenant project** (`cc798cdb3e124465ap-tp` in `us-central1`).
    - Because `gcp-demo-02-307713` already had an older Egress Agent Gateway in `us-central1` (`projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agent-gateway`, created on `2026-05-11` during earlier PSC `agent-gateway-na` testing), the shared `us-central1` tenant project already has wildcard routes bound to that original gateway (`BKI #16`).
    - **Best Practice:** Either reuse the single regional Egress Agent Gateway per region, or deploy new Egress Agent Gateway experiments in a clean region where no prior `AGENT_TO_ANYWHERE` gateway was bound (such as `asia-southeast1` or `europe-west1`).
+
+4. **Gotcha #4 — Why the Google Cloud Console UI Disabled the Gateway `Delete` Button (`"Remove all associated authz policies before deleting the gateway"`) & Hidden Naming Rule:**
+   - In the Cloud Console UI (`Agent Platform -> Govern -> Gateways -> <gateway>`), the **Delete** button is disabled whenever any `AuthzPolicy` + `AuthzExtension` is attached to the gateway (`serviceExtensions().length > 0`).
+   - **Crucial UI Naming Rule:** The Cloud Console UI only renders the **"Access authorization"** card (with the blue **Remove** button) if the `AuthzPolicy` is named **`<gateway-name>-iap-authzpolicy`** (and extension `<gateway-name>-iap-authzextension`), and only renders the **"AI Security"** card (with the blue **Remove** button) if the `AuthzPolicy` is named **`<gateway-name>-aisecurity-authzpolicy`** (and extension `<gateway-name>-aisecurity-authzextension`)!
+   - If you create an `AuthzPolicy` via CLI with any other name (e.g., `agw-study-ingress-authz-policy-modar`), the Gateway Details UI hides the **Remove** button—and **Network Services $\rightarrow$ Service Extensions** disables the UI Delete button (`"This service extension cannot be deleted in the Google Cloud console"`).
+   - **Fix in [`cfg/env.sh`](./cfg/env.sh) & [`render_configs.sh`](./render_configs.sh):** We updated the default policy/extension names in `cfg/env.sh` to `<gateway>-iap-authzpolicy` / `<gateway>-aisecurity-authzpolicy` so that even CLI-created policies show the **Remove** button in the Console UI!
+
+---
+
+## 10. Step-by-Step Deletion & Re-Deployment Guide (UI-First Workflow + `gcloud` Fallback)
+
+### 10.1 The Reverse-Dependency Deletion Order
+
+Just like deleting a VPC requires deleting Subnets, Routes, and Firewall Rules first, Agent Gateway resources must be deleted in **strict reverse dependency order**:
+
+```mermaid
+flowchart TD
+    Step1["Step 1: Unbind or Delete ReasoningEngine Agent<br/>(Agent Platform -> Scale -> Deployments)"] --> Step2["Step 2: Remove AuthzPolicies & Service Extensions FIRST<br/>(Gateway Details UI -> 'Remove' on AI Security / Access Authorization)"]
+    Step2 --> Step3["Step 3: Delete Agent Gateways<br/>(Agent Platform -> Govern -> Gateways -> 'Delete')"]
+    Step3 --> Step4["Step 4: Delete Model Armor Template, UAP Policy & Custom Agent Registry Services"]
+```
+
+| Deletion Step | Resource Type | Can It Be Deleted in the UI? | Exact UI Steps (Preferred) | `gcloud` CLI / Script Fallback |
+| :--- | :--- | :--- | :--- | :--- |
+| **Step 1** | **Agent Binding / ReasoningEngine Agents** (`check-gcp-subnet-ips-agw`, `network-agent-agw`) | **Yes** (Delete Agent in UI) / **CLI** (Unbind Gateway only without deleting Agent) | Go to **Agent Platform $\rightarrow$ Scale $\rightarrow$ Deployments** (`us-central1`), select `check-gcp-subnet-ips-agw` (and `network-agent-agw`), and click **Delete**. | Unbind without deleting agent:<br>`./cleanup_resources.sh --policies-only`<br>Or delete agents:<br>`gcloud alpha ai reasoning-engines delete <ID> --region=us-central1` |
+| **Step 2** | **AuthzPolicies & Service Extensions** (`AI Security` / `Access authorization`) | **Yes — IF created in UI or named `<gw>-aisecurity-authzpolicy` / `<gw>-iap-authzpolicy`!**<br>*(No in `Network Services -> Service Extensions`)* | Go to **Agent Platform $\rightarrow$ Govern $\rightarrow$ Gateways**, click on `agw-study-ingress` (or `agw-study-egress`), and click the blue **`Remove`** button at the top-right of the **AI Security** card and/or **Access authorization** card. *(This deletes both the `AuthzPolicy` and `AuthzExtension` together!)* | **MUST delete `AuthzPolicy` BEFORE `AuthzExtension`:**<br>`gcloud beta network-security authz-policies delete <POLICY_NAME> --location=us-central1`<br>`gcloud beta service-extensions authz-extensions delete <EXT_NAME> --location=us-central1`<br>*(Or run `./cleanup_resources.sh --policies-only`)* |
+| **Step 3** | **Agent Gateways** (`agw-study-ingress`, `agw-study-egress`) | **Yes (100% UI)** | Once Step 2 is done, on **Agent Platform $\rightarrow$ Govern $\rightarrow$ Gateways $\rightarrow$ `<gateway>`**, the top-right **`Delete`** button becomes enabled! Click **`Delete`**. | `gcloud alpha network-services agent-gateways delete agw-study-ingress --location=us-central1`<br>`gcloud alpha network-services agent-gateways delete agw-study-egress --location=us-central1` |
+| **Step 4** | **Model Armor Template** (`agw-study-ingress-modar-req-template`) | **Yes (100% UI)** | Go to **Security $\rightarrow$ Model Armor $\rightarrow$ Templates**, select `agw-study-ingress-modar-req-template`, and click **`Delete`**. | `gcloud model-armor templates delete agw-study-ingress-modar-req-template --location=us-central1` |
+| **Step 5** | **IAM Unified Access Policy (UAP) & PolicyBinding** (`uap-policy-agw-study-egress`) | **Yes / CLI** | Go to **Agent Platform $\rightarrow$ Govern $\rightarrow$ Policies** (or **IAM & Admin $\rightarrow$ Access Policies**) to remove the binding and policy. | `gcloud iam policy-bindings delete uap-binding-agw-study-egress --location=global`<br>`gcloud iam access-policies delete uap-policy-agw-study-egress --location=global` |
+| **Step 6** | **Custom Agent Registry Services** (`core-gapi-services`, `check-gcp-subnet-ips-agw`) | **Yes (100% UI)** | Go to **Agent Platform $\rightarrow$ Govern $\rightarrow$ Agent Registry $\rightarrow$ Services** (`us-central1`), select `core-gapi-services` and `check-gcp-subnet-ips-agw`, and click **`Delete`**. | `gcloud alpha agent-registry services delete core-gapi-services --location=us-central1`<br>`gcloud alpha agent-registry services delete check-gcp-subnet-ips-agw --location=us-central1` |
+
+---
+
+### 10.2 UI-First Re-Deployment Guide (How to Create Everything from the UI So It Can Always Be Deleted from the UI!)
+
+If you prefer using the **Google Cloud Console UI** for re-deploying the Agent Gateway stack:
+
+1. **Step 1 (UI) — Create the Model Armor Template first:**
+   - Go to **Security $\rightarrow$ Model Armor $\rightarrow$ Templates** $\rightarrow$ **Create Template**.
+   - Name: `agw-study-ingress-modar-req-template`, Region: **`us-central1`** (or `asia-southeast1`).
+   - Enable **Prompt injection and jailbreak detection** (`Low and above`) and **Responsible AI** filters, and click **Create**.
+2. **Step 2 (UI) — Create the Ingress Agent Gateway + AI Security in One Wizard:**
+   - Go to **Agent Platform $\rightarrow$ Govern $\rightarrow$ Gateways** $\rightarrow$ **Create Gateway**.
+   - Name: `agw-study-ingress`, Region: **`us-central1`**, Governed access path: **Client-to-Agent (ingress)**.
+   - In the **AI Security (Model Armor)** section of the wizard, toggle **Enable AI Security** ON and select `agw-study-ingress-modar-req-template` for both Request and Response templates!
+   - Click **Create**.
+   - *Why doing this in the UI is great:* The UI automatically creates `agw-study-ingress-aisecurity-authzpolicy` and `agw-study-ingress-aisecurity-authzextension` with the exact names that enable the UI **Edit** and **Remove** buttons on the Gateway Details page!
+   - *(Note: If you test prompt inspection and need the `authorization` header forwarded to Model Armor, run `gcloud beta service-extensions authz-extensions import agw-study-ingress-aisecurity-authzextension --source=cfg/agw-study-ingress-svc-ext-modar.yaml --location=us-central1` once after creation.)*
+3. **Step 3 (UI) — Create the Egress Agent Gateway + IAP Access Authorization in One Wizard:**
+   - Go to **Agent Platform $\rightarrow$ Govern $\rightarrow$ Gateways** $\rightarrow$ **Create Gateway**.
+   - Name: `agw-study-egress`, Region: **`us-central1`**, Governed access path: **Agent-to-Anywhere (egress)**.
+   - Under **Registries**, select your `us-central1` and `global` Agent Registries.
+   - Under **Access authorization**, select **Enforce** (or **Audit only**) and **Unified Access Policy (recommended)**, then click **Create**.
+   - *Why doing this in the UI is great:* The UI automatically creates `agw-study-egress-iap-authzpolicy` and `agw-study-egress-iap-authzextension` so the **Access authorization** card and its **Remove** button appear directly on the Gateway Details UI page!
+4. **Step 4 (CLI — Required Only for Deploying Python Agent Code with `agentGatewayConfig`):**
+   - Because Vertex AI Agent Engine (`ReasoningEngine`) source deployments require packaging your Python code (`check_gcp_subnet_ips` and `network_agent`) with `identity_type="AGENT_IDENTITY"` and `agentGatewayConfig`, run `deploy_agent.py` (see Step 5 in Section 7 above) and then run `./render_configs.sh --auto-discover` to update `cfg/env.sh` with any new random `ReasoningEngine` IDs!
+
