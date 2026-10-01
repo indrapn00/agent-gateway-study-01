@@ -25,13 +25,32 @@ if [[ "${1:-}" == "--auto-discover" ]]; then
   DISCOVERED_ORG_ID=$(gcloud projects get-ancestors "${PROJECT_ID}" --format="value(id)" 2>/dev/null | tail -n 1 || true)
   [[ -n "${DISCOVERED_ORG_ID}" ]] && export ORG_ID="${DISCOVERED_ORG_ID}"
 
-  DISCOVERED_SUBNET_ID=$(gcloud alpha ai reasoning-engines list --region="${REGION}" --project="${PROJECT_ID}" \
-    --filter="displayName=check-gcp-subnet-ips-agw" --format="value(name)" 2>/dev/null | head -n 1 | awk -F'/' '{print $NF}' || true)
-  [[ -n "${DISCOVERED_SUBNET_ID}" ]] && export SUBNET_ENGINE_ID="${DISCOVERED_SUBNET_ID}"
+  # Discover ReasoningEngine IDs via Vertex AI REST API (sorted newest-first by createTime)
+  TOKEN=$(gcloud auth print-access-token 2>/dev/null || true)
+  if [[ -n "${TOKEN}" ]]; then
+    RE_JSON=$(curl -s -H "Authorization: Bearer ${TOKEN}" \
+      "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines" 2>/dev/null || echo "{}")
 
-  DISCOVERED_NET_ID=$(gcloud alpha ai reasoning-engines list --region="${REGION}" --project="${PROJECT_ID}" \
-    --filter="displayName=network-agent-agw" --format="value(name)" 2>/dev/null | head -n 1 | awk -F'/' '{print $NF}' || true)
-  [[ -n "${DISCOVERED_NET_ID}" ]] && export NETWORK_ENGINE_ID="${DISCOVERED_NET_ID}"
+    DISCOVERED_SUBNET_ID=$(echo "${RE_JSON}" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+engines = [e for e in data.get('reasoningEngines', []) if e.get('displayName') == 'check-gcp-subnet-ips-agw']
+engines.sort(key=lambda e: e.get('createTime', ''), reverse=True)
+if engines:
+    print(engines[0]['name'].split('/')[-1])
+" 2>/dev/null || true)
+    [[ -n "${DISCOVERED_SUBNET_ID}" ]] && export SUBNET_ENGINE_ID="${DISCOVERED_SUBNET_ID}"
+
+    DISCOVERED_NET_ID=$(echo "${RE_JSON}" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+engines = [e for e in data.get('reasoningEngines', []) if e.get('displayName') == 'network-agent-agw']
+engines.sort(key=lambda e: e.get('createTime', ''), reverse=True)
+if engines:
+    print(engines[0]['name'].split('/')[-1])
+" 2>/dev/null || true)
+    [[ -n "${DISCOVERED_NET_ID}" ]] && export NETWORK_ENGINE_ID="${DISCOVERED_NET_ID}"
+  fi
 
   DISCOVERED_CORE_EP=$(gcloud alpha agent-registry services describe core-gapi-services \
     --location="${REGION}" --project="${PROJECT_ID}" --format="value(registryResource)" 2>/dev/null | awk -F'/' '{print $NF}' || true)
@@ -45,6 +64,37 @@ if [[ "${1:-}" == "--auto-discover" ]]; then
   DISCOVERED_CUSTOM_REG=$(gcloud alpha agent-registry services describe check-gcp-subnet-ips-agw \
     --location="${REGION}" --project="${PROJECT_ID}" --format="value(registryResource)" 2>/dev/null | awk -F'/' '{print $NF}' || true)
   [[ -n "${DISCOVERED_CUSTOM_REG}" ]] && export SUBNET_AGENT_CUSTOM_REG_ID="${DISCOVERED_CUSTOM_REG}"
+
+  # Persist discovered values back into cfg/env.sh so subsequent `source cfg/env.sh` loads them!
+  python3 - "${SCRIPT_DIR}/cfg/env.sh" << PYEOF
+import re, sys, os
+env_path = sys.argv[1]
+with open(env_path, "r") as f:
+    content = f.read()
+
+updates = {
+    "PROJECT_NUMBER": os.environ.get("PROJECT_NUMBER", ""),
+    "ORG_ID": os.environ.get("ORG_ID", ""),
+    "SUBNET_ENGINE_ID": os.environ.get("SUBNET_ENGINE_ID", ""),
+    "NETWORK_ENGINE_ID": os.environ.get("NETWORK_ENGINE_ID", ""),
+    "CORE_GAPI_ENDPOINT_ID": os.environ.get("CORE_GAPI_ENDPOINT_ID", ""),
+    "SUBNET_AGENT_AUTO_REG_ID": os.environ.get("SUBNET_AGENT_AUTO_REG_ID", ""),
+    "SUBNET_AGENT_CUSTOM_REG_ID": os.environ.get("SUBNET_AGENT_CUSTOM_REG_ID", ""),
+}
+
+for k, v in updates.items():
+    if v:
+        content = re.sub(
+            rf'^export {k}=.*$',
+            f'export {k}="{v}"',
+            content,
+            flags=re.MULTILINE,
+        )
+
+with open(env_path, "w") as f:
+    f.write(content)
+PYEOF
+  echo "Updated cfg/env.sh in-place with auto-discovered IDs."
 fi
 
 echo "=============================================================================="

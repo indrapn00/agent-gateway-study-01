@@ -296,7 +296,31 @@ def main():
 
         print(f"Building and deploying '{args.display_name}' ({resource_name})...")
         engine = client.agent_engines.update(name=resource_name, config=deploy_config)
-        print(f"SUCCESS: Agent deployed: {engine.api_resource.name}")
+        deployed_name = engine.api_resource.name
+        deployed_id = deployed_name.split("/")[-1]
+        print(f"SUCCESS: Agent deployed: {deployed_name}")
+
+        # Automatically update SUBNET_ENGINE_ID or NETWORK_ENGINE_ID in cfg/env.sh if present
+        env_sh_path = os.path.join(original_cwd, "cfg", "env.sh")
+        if os.path.exists(env_sh_path):
+            target_var = None
+            if "subnet" in args.display_name.lower() or app_name == "check_gcp_subnet_ips":
+                target_var = "SUBNET_ENGINE_ID"
+            elif "network" in args.display_name.lower() or app_name == "network_agent":
+                target_var = "NETWORK_ENGINE_ID"
+            if target_var:
+                import re
+                with open(env_sh_path, "r", encoding="utf-8") as ef:
+                    env_content = ef.read()
+                env_content = re.sub(
+                    rf'^export {target_var}=.*$',
+                    f'export {target_var}="{deployed_id}"',
+                    env_content,
+                    flags=re.MULTILINE,
+                )
+                with open(env_sh_path, "w", encoding="utf-8") as ef:
+                    ef.write(env_content)
+                print(f"Auto-updated {target_var}=\"{deployed_id}\" in {env_sh_path}")
     finally:
         os.chdir(original_cwd)
         shutil.rmtree(staging_dir, ignore_errors=True)
