@@ -1,3 +1,15 @@
+# ==============================================================================
+# Ingress Content AuthzPolicy (Binds Model Armor Extension to Ingress Gateway)
+# Generated from `cfg/env.sh` via `./render_configs.sh`
+#
+# VARIABLES TO CHANGE WHEN RE-DEPLOYING TO A NEW PROJECT / REGION:
+#   1. `target.resources[0]`: Replace PROJECT_ID ("gcp-demo-02-307713"), REGION ("us-central1"),
+#      and AGW_INGRESS_NAME ("agw-study-ingress").
+#      - Example: "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress"
+#   2. `customProvider.authzExtension.resources[0]`: Replace PROJECT_ID ("gcp-demo-02-307713"),
+#      REGION ("us-central1"), and AGW_INGRESS_EXT_NAME ("agw-study-ingress-svc-ext-modar").
+#      - Example: "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-svc-ext-modar"
+# ==============================================================================
 name: agw-study-ingress-authz-policy-modar
 target:
   resources:

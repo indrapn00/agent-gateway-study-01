@@ -1,6 +1,6 @@
 [
   {
-    "description": "Rule 1: Allow agent runtimes in project to reach Core Google APIs",
+    "description": "Rule 1: Allow agent runtimes in project to reach Core Google APIs. [VARIABLES TO CHANGE: ORG_ID=304553879287, PROJECT_NUMBER=66063681189, PROJECT_ID=gcp-demo-02-307713, REGION=us-central1, CORE_GAPI_ENDPOINT_ID=agentregistry-00000000-0000-0000-444f-0dd5654527c5]",
     "effect": "ALLOW",
     "principals": [
       "principalSet://agents.global.org-304553879287.system.id.goog/attribute.platformContainer/aiplatform/projects/66063681189"
@@ -17,7 +17,7 @@
     }
   },
   {
-    "description": "Rule 2: Allow ONLY network-agent-agw (SPIFFE ID) to call check-gcp-subnet-ips-agw",
+    "description": "Rule 2: Allow ONLY network-agent-agw (SPIFFE ID) to call check-gcp-subnet-ips-agw. [VARIABLES TO CHANGE: ORG_ID=304553879287, PROJECT_NUMBER=66063681189, REGION=us-central1, NETWORK_ENGINE_ID=8162536280341610496, SUBNET_AGENT_AUTO_REG_ID=agentregistry-00000000-0000-0000-bf2d-ca1285f7103b, SUBNET_AGENT_CUSTOM_REG_ID=agentregistry-00000000-0000-0000-f25b-29d92d70d0d5]",
     "effect": "ALLOW",
     "principals": [
       "principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/8162536280341610496"

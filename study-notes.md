@@ -168,6 +168,36 @@ sequenceDiagram
 
 ---
 
+## 6.5 Parameterized Configs: What Changes When You Re-Deploy to a Different GCP Project?
+
+When you re-deploy this architecture in a **new GCP Project** (or re-create your agents, which generates new random **`ReasoningEngine` IDs** and new **`agentregistry-...` UUIDs**), you do **not** need to manually hunt through every YAML/JSON file.
+
+All variables are centralized in **[`cfg/env.sh`](./cfg/env.sh)** (documented in **[`cfg/README.md`](./cfg/README.md)**), and **[`./render_configs.sh`](./render_configs.sh)** regenerates all 8 files in `cfg/` in one command:
+```bash
+# Option A: Edit cfg/env.sh manually, then render all cfg/*.yaml and cfg/*.json files:
+./render_configs.sh
+
+# Option B: Auto-discover PROJECT_NUMBER, ORG_ID, ReasoningEngine IDs, and Agent Registry UUIDs via gcloud:
+./render_configs.sh --auto-discover
+```
+
+### Checklist of Obvious + "Hidden" Variables That Change Across Projects
+
+| Variable in [`cfg/env.sh`](./cfg/env.sh) | Obvious or Hidden? | Description & Example | How to Discover (`gcloud`) |
+| :--- | :--- | :--- | :--- |
+| **`PROJECT_ID`** | Obvious | GCP Project ID string.<br>*Example:* `"gcp-demo-02-307713"` | `gcloud config get-value project` |
+| **`PROJECT_NUMBER`** | Obvious | Numeric GCP Project Number.<br>*Example:* `"66063681189"` | `gcloud projects describe $PROJECT_ID --format="value(projectNumber)"` |
+| **`SUBNET_ENGINE_ID`** | Obvious (Random per deploy) | Numeric `ReasoningEngine` ID of `check-gcp-subnet-ips-agw`.<br>*Example:* `"8226712575031640064"` | `gcloud alpha ai reasoning-engines list --region=$REGION --project=$PROJECT_ID --filter="displayName=check-gcp-subnet-ips-agw" --format="value(name)" \| awk -F'/' '{print $NF}'` |
+| **`NETWORK_ENGINE_ID`** | Obvious (Random per deploy) | Numeric `ReasoningEngine` ID of `network-agent-agw` (used in UAP Rule 2 SPIFFE Principal).<br>*Example:* `"8162536280341610496"` | `gcloud alpha ai reasoning-engines list --region=$REGION --project=$PROJECT_ID --filter="displayName=network-agent-agw" --format="value(name)" \| awk -F'/' '{print $NF}'` |
+| **`ORG_ID`** | **Hidden** (Inside SPIFFE URIs in `uap-rules*.json`) | Numeric GCP Organization ID in `principal://agents.global.org-<ORG_ID>.system.id.goog/...`. Changes if your new project belongs to a different Organization!<br>*Example:* `"304553879287"` | `gcloud projects get-ancestors $PROJECT_ID --format="value(id)" \| tail -n 1` |
+| **`REGION`** | **Hidden** (Inside Model Armor REP hostname!) | Changes not only resource paths, but also the **Regional Endpoint (REP) hostname** on line 2 of `cfg/agw-study-ingress-svc-ext-modar.yaml`: `service: modelarmor.<REGION>.rep.googleapis.com`.<br>*Example:* `"us-central1"` or `"asia-southeast1"` | N/A |
+| **`CORE_GAPI_ENDPOINT_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 1) | Internal `agentregistry-...` UUID created when you register `core-gapi-services`. IAP v2 evaluates `destination.agent_registry.endpoint.name` against this UUID!<br>*Example:* `"agentregistry-00000000-0000-0000-444f-0dd5654527c5"` | `gcloud alpha agent-registry services describe core-gapi-services --location=$REGION --project=$PROJECT_ID --format="value(registryResource)" \| awk -F'/' '{print $NF}'` |
+| **`SUBNET_AGENT_AUTO_REG_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 2) | Internal `agentregistry-...` UUID auto-created in Agent Registry when `check-gcp-subnet-ips-agw` is deployed on Agent Platform.<br>*Example:* `"agentregistry-00000000-0000-0000-bf2d-ca1285f7103b"` | `gcloud alpha agent-registry agents list --location=$REGION --project=$PROJECT_ID --filter="displayName=check-gcp-subnet-ips-agw" --format="value(name)" \| head -n 1 \| awk -F'/' '{print $NF}'` |
+| **`SUBNET_AGENT_CUSTOM_REG_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 2) | Internal `agentregistry-...` UUID created when you register the custom `.mtls.` service `check-gcp-subnet-ips-agw` in Agent Registry.<br>*Example:* `"agentregistry-00000000-0000-0000-f25b-29d92d70d0d5"` | `gcloud alpha agent-registry services describe check-gcp-subnet-ips-agw --location=$REGION --project=$PROJECT_ID --format="value(registryResource)" \| awk -F'/' '{print $NF}'` |
+| **P4SA IAM Bindings** | **Hidden** (Project-level IAM) | Two Google-managed Service Agents in your new project include `PROJECT_NUMBER` in their email and need IAM roles:<br>1. `service-<PROJECT_NUMBER>@gcp-sa-dep.iam.gserviceaccount.com` $\rightarrow$ `roles/modelarmor.user`<br>2. `service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` $\rightarrow$ `roles/aiplatform.user` | See Step 4b below |
+
+---
+
 ## 7. Step-by-Step Self-Study Reproduction Guide (Console UI + `gcloud` CLI)
 
 ### Step 1: Register Core Google APIs & Target Agent in Agent Registry

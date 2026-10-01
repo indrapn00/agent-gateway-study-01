@@ -1,3 +1,15 @@
+# ==============================================================================
+# Egress Request AuthzPolicy (Binds IAP v2 AuthzExtension to Egress Gateway)
+# Generated from `cfg/env.sh` via `./render_configs.sh`
+#
+# VARIABLES TO CHANGE WHEN RE-DEPLOYING TO A NEW PROJECT / REGION:
+#   1. `target.resources[0]`: Replace PROJECT_ID ("gcp-demo-02-307713"), REGION ("us-central1"),
+#      and AGW_EGRESS_NAME ("agw-study-egress").
+#      - Example: "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress"
+#   2. `customProvider.authzExtension.resources[0]`: Replace PROJECT_ID ("gcp-demo-02-307713"),
+#      REGION ("us-central1"), and AGW_EGRESS_EXT_NAME ("agw-study-egress-svc-ext-iap").
+#      - Example: "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-svc-ext-iap"
+# ==============================================================================
 name: agw-study-egress-authz-policy-iap
 target:
   resources:

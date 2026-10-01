@@ -1,3 +1,12 @@
+# ==============================================================================
+# Egress IAP v2 AuthzExtension Definition
+# Generated from `cfg/env.sh` via `./render_configs.sh`
+#
+# VARIABLES TO CHANGE WHEN RE-DEPLOYING:
+#   1. `name`: AuthzExtension resource name (`AGW_EGRESS_EXT_NAME`).
+#      - Example: "agw-study-egress-svc-ext-iap"
+#   Note: `service: iap.googleapis.com` is global and does NOT change across regions/projects.
+# ==============================================================================
 name: agw-study-egress-svc-ext-iap
 service: iap.googleapis.com
 failOpen: false

@@ -25,24 +25,48 @@ os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 # ============================================================================
 # CONFIGURATION: CHOOSE HOW `network_agent` CONNECTS TO `check_gcp_subnet_ips`
 # ============================================================================
+# [AGENT GATEWAY STUDY NOTE 0 - Parameterized Project, Region & ReasoningEngine ID]:
+# When re-deploying to a DIFFERENT GCP Project or Region (which also assigns a
+# new random numeric `ReasoningEngine` ID), you can either:
+#   Option A: Pass individual environment variables (`GCP_PROJECT_NUMBER`,
+#             `GCP_REGION`, `CLOUD_RUN_REGION`, `SUBNET_ENGINE_ID`), OR
+#   Option B: Pass the full resource path in `CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID`
+#             (or `CHECK_GCP_SUBNET_IPS_BASE_URL` for Mode 1 Cloud Run), OR
+#   Option C: Edit the fallback default values right below.
+#
+# Variables & Examples:
+#   - `GCP_PROJECT_NUMBER`: Your numeric GCP Project Number.
+#       * Example: "66063681189"
+#       * How to find: `gcloud projects describe <PROJECT_ID> --format="value(projectNumber)"`
+#   - `GCP_REGION`: Region where `check-gcp-subnet-ips` is deployed on Agent Platform.
+#       * Example: "us-central1" (or "asia-southeast1", "asia-southeast2")
+#   - `CLOUD_RUN_REGION`: Region where `check-gcp-subnet-ips` is deployed on Cloud Run (Mode 1).
+#       * Example: "asia-southeast2"
+#   - `SUBNET_ENGINE_ID`: Random numeric ReasoningEngine ID generated when `check-gcp-subnet-ips`
+#     is deployed on Vertex AI Agent Engine.
+#       * Example: "8226712575031640064"
+# ============================================================================
+GCP_PROJECT_NUMBER = os.environ.get("GCP_PROJECT_NUMBER", "66063681189")
+GCP_REGION = os.environ.get("GCP_REGION", "us-central1")
+CLOUD_RUN_REGION = os.environ.get("CLOUD_RUN_REGION", "asia-southeast2")
+SUBNET_ENGINE_ID = os.environ.get("SUBNET_ENGINE_ID", "8226712575031640064")
+
 # Supported values for `SUBNET_AGENT_TARGET`:
-#   - "auto" (default):
+#   - "auto":
 #       * On Cloud Run -> calls `check-gcp-subnet-ips` on Cloud Run (Mode 1: Native Cloud Run)
 #       * On Agent Platform -> calls `check-gcp-subnet-ips` on Agent Platform (Mode 2: Native Agent Platform)
 #   - "cloud_run":
 #       * Forces `network_agent` to call `check-gcp-subnet-ips` on Cloud Run via A2A URL
-#   - "agent_platform":
-# [AGENT GATEWAY STUDY NOTE 0 - Default Target Mode]:
-# For `agent-gateway-study-01` (which focuses on Mode 2 and Mode 3), we default
-# `SUBNET_AGENT_TARGET` to `"agent_platform"` so both Cloud Run (Mode 3) and
-# Agent Platform (Mode 2) connect to `check-gcp-subnet-ips-agw` (`8226712575031640064`).
+#   - "agent_platform" (default for Agent Gateway Study Mode 2 & Mode 3):
+#       * Forces `network_agent` to call `check-gcp-subnet-ips` on Agent Platform via ReasoningEngine ID
 SUBNET_AGENT_TARGET = os.environ.get("SUBNET_AGENT_TARGET", "agent_platform").lower()
 
 # 1. Target URL for Cloud Run `check-gcp-subnet-ips` (Used in Mode 1: Cloud Run -> Cloud Run)
-#    Example: "https://check-gcp-subnet-ips-66063681189.asia-southeast2.run.app"
+#    - Description: Base HTTPS URL of the `check-gcp-subnet-ips` Cloud Run service.
+#    - Example: "https://check-gcp-subnet-ips-66063681189.asia-southeast2.run.app"
 CHECK_GCP_SUBNET_IPS_BASE_URL = os.environ.get(
     "CHECK_GCP_SUBNET_IPS_BASE_URL",
-    "https://check-gcp-subnet-ips-66063681189.asia-southeast2.run.app",
+    f"https://check-gcp-subnet-ips-{GCP_PROJECT_NUMBER}.{CLOUD_RUN_REGION}.run.app",
 )
 CHECK_GCP_SUBNET_IPS_CARD_URL = os.environ.get(
     "CHECK_GCP_SUBNET_IPS_AGENT_CARD_URL",
@@ -50,11 +74,13 @@ CHECK_GCP_SUBNET_IPS_CARD_URL = os.environ.get(
 )
 
 # 2. Target Resource Name for Agent Platform `check-gcp-subnet-ips` (Used in Mode 2 & Mode 3)
-#    - Baseline (asia-southeast2): "projects/66063681189/locations/asia-southeast2/reasoningEngines/8268573731480141824"
-#    - Agent Gateway Study (us-central1): "projects/66063681189/locations/us-central1/reasoningEngines/8226712575031640064"
+#    - Description: Full Vertex AI ReasoningEngine resource name in the format:
+#      `projects/<GCP_PROJECT_NUMBER>/locations/<GCP_REGION>/reasoningEngines/<SUBNET_ENGINE_ID>`
+#    - Example (us-central1):     "projects/66063681189/locations/us-central1/reasoningEngines/8226712575031640064"
+#    - Example (asia-southeast2): "projects/66063681189/locations/asia-southeast2/reasoningEngines/8268573731480141824"
 CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID = os.environ.get(
     "CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID",
-    "projects/66063681189/locations/us-central1/reasoningEngines/8226712575031640064",
+    f"projects/{GCP_PROJECT_NUMBER}/locations/{GCP_REGION}/reasoningEngines/{SUBNET_ENGINE_ID}",
 )
 
 

@@ -13,7 +13,10 @@ agent-gateway-study-01/
 ├── README.md                                        # Quickstart, live resource inventory & validation guide
 ├── study-notes.md                                   # Deep-dive Agent Gateway study notes (UI + gcloud CLI steps)
 ├── deploy_agent.py                                  # Vertex AI Agent Engine deployment script (Agent Identity + Agent Gateway)
+├── render_configs.sh                                # One-command generator that renders all cfg/ files from cfg/env.sh
 ├── cfg/                                             # Declarative Agent Gateway, IAP v2, UAP, and Model Armor configs
+│   ├── README.md                                    # Complete variable reference table (including hidden static values!)
+│   ├── env.sh                                       # Central environment variables (PROJECT_ID, PROJECT_NUMBER, ORG_ID, ENGINE_IDs, UUIDs)
 │   ├── agw-study-egress.yaml                        # Egress Agent Gateway (AGENT_TO_ANYWHERE)
 │   ├── agw-study-egress-svc-ext-iap.yaml            # IAP v2 Service Extension for Egress Gateway
 │   ├── agw-study-egress-authz-policy-iap.yaml       # Request AuthzPolicy binding IAP v2 to Egress Gateway
@@ -27,12 +30,29 @@ agent-gateway-study-01/
 │   ├── agent.py
 │   ├── agent.json
 │   └── requirements.txt
-└── network_agent/                                   # Main Orchestrator Agent (annotated with [AGENT GATEWAY STUDY NOTE 1-3])
+└── network_agent/                                   # Main Orchestrator Agent (annotated with [AGENT GATEWAY STUDY NOTE 0-3])
     ├── __init__.py
     ├── agent.py
     ├── agent.json
     └── requirements.txt
 ```
+
+---
+
+## 1.5 Re-Deploying to a Different GCP Project or With New ReasoningEngine IDs
+
+When you move to a **different GCP Project**, **different Organization**, **different Region**, or re-create your agents on Agent Platform (which assigns new random **`ReasoningEngine` IDs** and new random **`agentregistry-...` UUIDs**):
+
+1. Open **[`cfg/env.sh`](./cfg/env.sh)** (see **[`cfg/README.md`](./cfg/README.md)** for a full table of all 10 variables, including hidden values like `ORG_ID`, `modelarmor.<REGION>.rep.googleapis.com`, and the 3 `agentregistry-...` UUIDs).
+2. Either edit the variables in [`cfg/env.sh`](./cfg/env.sh) and run:
+   ```bash
+   ./render_configs.sh
+   ```
+   **OR** let `gcloud` automatically discover your `PROJECT_NUMBER`, `ORG_ID`, `SUBNET_ENGINE_ID`, `NETWORK_ENGINE_ID`, and `agentregistry-...` UUIDs:
+   ```bash
+   ./render_configs.sh --auto-discover
+   ```
+3. Every generated `.yaml` and `.json` file in `cfg/` also includes inline comments/descriptions and examples showing which fields change across projects.
 
 ---
 

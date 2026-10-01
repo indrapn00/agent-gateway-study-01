@@ -1,3 +1,13 @@
+# ==============================================================================
+# Ingress Agent Gateway Definition (CLIENT_TO_AGENT)
+# Generated from `cfg/env.sh` via `./render_configs.sh`
+#
+# VARIABLES TO CHANGE WHEN RE-DEPLOYING:
+#   1. `name`: Ingress Agent Gateway name (`AGW_INGRESS_NAME`).
+#      - Example: "agw-study-ingress"
+#   Note: No Project ID or Region is hardcoded inside this file (you pass
+#   `--location=${REGION} --project=${PROJECT_ID}` on the `gcloud` CLI).
+# ==============================================================================
 name: agw-study-ingress
 protocols:
 - MCP
