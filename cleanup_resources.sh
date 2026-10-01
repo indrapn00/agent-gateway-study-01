@@ -35,13 +35,16 @@ echo "==========================================================================
 if [[ "${MODE}" == "--include-agents" ]]; then
   echo ""
   echo ">>> [Step 1/6] Deleting ReasoningEngine Agents (${REGION}) & Cloud Run Service (${CLOUD_RUN_REGION})..."
-  if [[ -n "${SUBNET_ENGINE_ID:-}" ]]; then
-    gcloud alpha ai reasoning-engines delete "${SUBNET_ENGINE_ID}" \
-      --region="${REGION}" --project="${PROJECT_ID}" --quiet || true
-  fi
-  if [[ -n "${NETWORK_ENGINE_ID:-}" ]]; then
-    gcloud alpha ai reasoning-engines delete "${NETWORK_ENGINE_ID}" \
-      --region="${REGION}" --project="${PROJECT_ID}" --quiet || true
+  TOKEN=$(gcloud auth print-access-token 2>/dev/null || true)
+  if [[ -n "${TOKEN}" ]]; then
+    for ENGINE_ID in "${SUBNET_ENGINE_ID:-}" "${NETWORK_ENGINE_ID:-}"; do
+      if [[ -n "${ENGINE_ID}" ]]; then
+        echo "    Deleting reasoningEngine/${ENGINE_ID}..."
+        curl -s -X DELETE \
+          -H "Authorization: Bearer ${TOKEN}" \
+          "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${ENGINE_ID}?force=true" >/dev/null || true
+      fi
+    done
   fi
   gcloud run services delete network-agent-agw \
     --region="${CLOUD_RUN_REGION}" --project="${PROJECT_ID}" --quiet || true
