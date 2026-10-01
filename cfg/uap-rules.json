@@ -1,6 +1,6 @@
 [
   {
-    "description": "Rule 1: Allow agent runtimes in project to reach Core Google APIs. [VARIABLES TO CHANGE: ORG_ID=304553879287, PROJECT_NUMBER=66063681189, PROJECT_ID=gcp-demo-02-307713, REGION=us-central1, CORE_GAPI_ENDPOINT_ID=agentregistry-00000000-0000-0000-444f-0dd5654527c5]",
+    "description": "Rule 1: Allow Agent Platform runtimes in project 66063681189 to reach Core Google APIs (agentregistry-00000000-0000-0000-444f-0dd5654527c5)",
     "effect": "ALLOW",
     "principals": [
       "principalSet://agents.global.org-304553879287.system.id.goog/attribute.platformContainer/aiplatform/projects/66063681189"

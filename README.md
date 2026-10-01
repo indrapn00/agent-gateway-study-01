@@ -168,6 +168,9 @@ Once Steps 1 and 2 are complete, the Gateway has zero attached policies and zero
 ---
 
 ### Step 5: Delete the IAM Unified Access Policy (UAP) & Policy Binding
+- **In the UI:**
+  1. Go to **IAM & Admin $\rightarrow$ IAM** and click the **Access policies** tab at the top of the page (next to `Allow` and `Deny`: [`https://console.cloud.google.com/iam-admin/iam/access-policies?project=gcp-demo-02-307713`](https://console.cloud.google.com/iam-admin/iam/access-policies?project=gcp-demo-02-307713)), or go to **Agent Platform $\rightarrow$ Policies** ([`https://console.cloud.google.com/agent-platform/policies/iam?project=gcp-demo-02-307713`](https://console.cloud.google.com/agent-platform/policies/iam?project=gcp-demo-02-307713)).
+  2. On `uap-policy-agw-study-egress`, click $\vdots$ $\rightarrow$ **Unbind** first, then delete the policy.
 - **Via `gcloud` (Recommended — delete the Binding first, then the Access Policy):**
   ```bash
   source cfg/env.sh

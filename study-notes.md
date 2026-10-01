@@ -519,9 +519,12 @@ When an agent uses an Egress Agent Gateway (`AGENT_TO_ANYWHERE`), its outbound c
 
 ### Step 4: Create or Update the Unified Access Policy (UAP) Rules (For Egress Gateway Scenario 1)
 
-- **Using Google Cloud Console UI:**
-  1. Navigate to **IAM & Admin $\rightarrow$ Access Policies (Unified Access Policy)** to view or edit `uap-policy-agw-study-egress` and its CEL destination expressions targeting Agent Registry resources.
+- **Using Google Cloud Console UI (2 Ways to Navigate There):**
+  > **Why wasn't "Access Policies" in the left-hand sidebar under IAM & Admin?** Because in Google Cloud Console, Unified Access Policies live either under **Agent Platform $\rightarrow$ Policies** OR as a **horizontal tab at the top of the `IAM & Admin -> IAM` page** (next to the `Allow` and `Deny` tabs)!
+  1. **Option A (Agent Platform UI):** Go to **Agent Platform $\rightarrow$ Policies** (direct link: [`https://console.cloud.google.com/agent-platform/policies/iam?project=gcp-demo-02-307713`](https://console.cloud.google.com/agent-platform/policies/iam?project=gcp-demo-02-307713)).
+  2. **Option B (IAM & Admin UI):** Go to **IAM & Admin $\rightarrow$ IAM**, and at the **top of the IAM page** (next to the **Allow** and **Deny** tabs), click the **Access policies** tab (direct link: [`https://console.cloud.google.com/iam-admin/iam/access-policies?project=gcp-demo-02-307713`](https://console.cloud.google.com/iam-admin/iam/access-policies?project=gcp-demo-02-307713)). Here you can see `uap-policy-agw-study-egress` bound to your project and inspect/edit its rules!
 - **Using `gcloud` CLI:**
+  > **Note:** The IAM v3 `accessPolicies` API enforces a strict **`<= 256` character limit** on each rule's `"description"` field in `cfg/uap-rules*.json` (`render_configs.sh` keeps rule descriptions concise so this never fails).
   ```bash
   cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 

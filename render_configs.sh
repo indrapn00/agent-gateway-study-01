@@ -258,10 +258,11 @@ customProvider:
 EOF
 
 # 7. cfg/uap-rules.json (Rule 1 only: Default Deny for sub-agent calls)
+# Note: IAM v3 AccessPolicies enforces a strict <= 256 character limit on each rule's "description" field!
 cat > "${SCRIPT_DIR}/cfg/uap-rules.json" << EOF
 [
   {
-    "description": "Rule 1: Allow agent runtimes in project to reach Core Google APIs. [VARIABLES TO CHANGE: ORG_ID=${ORG_ID}, PROJECT_NUMBER=${PROJECT_NUMBER}, PROJECT_ID=${PROJECT_ID}, REGION=${REGION}, CORE_GAPI_ENDPOINT_ID=${CORE_GAPI_ENDPOINT_ID}]",
+    "description": "Rule 1: Allow Agent Platform runtimes in project ${PROJECT_NUMBER} to reach Core Google APIs (${CORE_GAPI_ENDPOINT_ID})",
     "effect": "ALLOW",
     "principals": [
       "principalSet://agents.global.org-${ORG_ID}.system.id.goog/attribute.platformContainer/aiplatform/projects/${PROJECT_NUMBER}"
@@ -281,10 +282,11 @@ cat > "${SCRIPT_DIR}/cfg/uap-rules.json" << EOF
 EOF
 
 # 8. cfg/uap-rules-allow-subnet.json (Rule 1 + Rule 2: Explicit Allow for network-agent-agw SPIFFE ID)
+# Note: IAM v3 AccessPolicies enforces a strict <= 256 character limit on each rule's "description" field!
 cat > "${SCRIPT_DIR}/cfg/uap-rules-allow-subnet.json" << EOF
 [
   {
-    "description": "Rule 1: Allow agent runtimes in project to reach Core Google APIs. [VARIABLES TO CHANGE: ORG_ID=${ORG_ID}, PROJECT_NUMBER=${PROJECT_NUMBER}, PROJECT_ID=${PROJECT_ID}, REGION=${REGION}, CORE_GAPI_ENDPOINT_ID=${CORE_GAPI_ENDPOINT_ID}]",
+    "description": "Rule 1: Allow Agent Platform runtimes in project ${PROJECT_NUMBER} to reach Core Google APIs (${CORE_GAPI_ENDPOINT_ID})",
     "effect": "ALLOW",
     "principals": [
       "principalSet://agents.global.org-${ORG_ID}.system.id.goog/attribute.platformContainer/aiplatform/projects/${PROJECT_NUMBER}"
@@ -301,7 +303,7 @@ cat > "${SCRIPT_DIR}/cfg/uap-rules-allow-subnet.json" << EOF
     }
   },
   {
-    "description": "Rule 2: Allow ONLY network-agent-agw (SPIFFE ID) to call check-gcp-subnet-ips-agw. [VARIABLES TO CHANGE: ORG_ID=${ORG_ID}, PROJECT_NUMBER=${PROJECT_NUMBER}, REGION=${REGION}, NETWORK_ENGINE_ID=${NETWORK_ENGINE_ID}, SUBNET_AGENT_AUTO_REG_ID=${SUBNET_AGENT_AUTO_REG_ID}, SUBNET_AGENT_CUSTOM_REG_ID=${SUBNET_AGENT_CUSTOM_REG_ID}]",
+    "description": "Rule 2: Allow ONLY network-agent-agw (${NETWORK_ENGINE_ID}) SPIFFE ID to call check-gcp-subnet-ips-agw",
     "effect": "ALLOW",
     "principals": [
       "principal://agents.global.org-${ORG_ID}.system.id.goog/resources/aiplatform/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}"
