@@ -282,7 +282,7 @@ if [ ! -d "$HOME/agent-gateway-study-01" ]; then
   git clone https://github.com/indrapn00/agent-gateway-study-01.git "$HOME/agent-gateway-study-01"
 fi
 cd "$HOME/agent-gateway-study-01"
-git pull
+git checkout -- . && git pull origin main
 source cfg/env.sh
 ```
 
