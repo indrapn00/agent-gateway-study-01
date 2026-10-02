@@ -897,14 +897,27 @@ source cfg/env.sh
 
 Run this command in Cloud Shell to bind **`network-agent-agw` (`${NETWORK_ENGINE_ID}`)** to **`agw-study-egress`** (`agentToAnywhereConfig`) in-place (preserving the same `NETWORK_ENGINE_ID`):
 
-> **Why does Egress Gateway (`agentToAnywhereConfig`) use `deploy_agent.py --update-existing` while Ingress Gateway (`clientToAgentConfig`) uses a 30-second `curl -X PATCH`?**
-> - **Ingress (`clientToAgentConfig`)** is configured on Vertex AI's **frontend router** outside the container, so a lightweight `PATCH` (`updateMask=spec.deployment_spec.agent_gateway_config`) completes in ~30 seconds without touching the container.
-> - **Egress (`agentToAnywhereConfig`)** injects the Egress Gateway's **TLS Inspection Root CA certificate (`agentGatewayCard.rootCertificates`) and outbound proxy settings inside the agent container**. Because Vertex AI does not persist `inlineSource` tarball bytes after a build, a bare `PATCH` without source code fails with `code: 13`. Running `deploy_agent.py --update-existing "${NETWORK_ENGINE_ID}"` re-uploads the source tarball while keeping the **exact same `NETWORK_ENGINE_ID`** (`989023353568231424`)!
-
 ```bash
 cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 
-# Update existing network-agent-agw (NETWORK_ENGINE_ID) in-place with Egress Agent Gateway bound:
+# Option A: Bind network-agent-agw (NETWORK_ENGINE_ID) in-place via REST PATCH:
+curl -s -X PATCH \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" \
+  -d "{
+    \"spec\": {
+      \"deploymentSpec\": {
+        \"agentGatewayConfig\": {
+          \"agentToAnywhereConfig\": {
+            \"agentGateway\": \"projects/${PROJECT_NUMBER}/locations/${REGION}/agentGateways/${AGW_EGRESS_NAME}\"
+          }
+        }
+      }
+    }
+  }"
+
+# Or Option B: Bind via deploy_agent.py --update-existing (keeps the same NETWORK_ENGINE_ID):
 python3 deploy_agent.py \
   --project "${PROJECT_ID}" \
   --region "${REGION}" \
@@ -918,7 +931,15 @@ python3 deploy_agent.py \
   -e SUBNET_AGENT_TARGET=agent_platform \
   -e CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID="projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}"
 ```
-After this command completes, open **Agent Platform $\rightarrow$ Deployments $\rightarrow$ `network-agent-agw` $\rightarrow$ Update service configuration $\rightarrow$ Deployment details** in the Console UI and verify that **`Agent to Anywhere (Egress)`** now shows `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress`!
+After this command completes, open **Agent Platform $\rightarrow$ Deployments $\rightarrow$ `network-agent-agw` $\rightarrow$ Update service configuration $\rightarrow$ Deployment details** in the Console UI and verify that **`Agent to Anywhere (Egress)`** shows `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress`.
+
+> **⚠️ Known Preview Limitation (`BKI #16` — Re-binding a Recreated `AGENT_TO_ANYWHERE` Gateway in the Same Region):**
+> When you bind an Egress Agent Gateway (`AGENT_TO_ANYWHERE`) in a region for the first time, Vertex AI provisions singleton Secure Web Proxy (SWP) networking resources inside your project's regional shared tenant project (`cc798cdb3e124465ap-tp` in `us-central1`), including a custom VPC (`240.0.0.0/4`) and a Traffic Director wildcard route named `aersvd-swp-http-route-agw-{binding_id}` (`hostnames: ["*"]`).
+> - Because `aersvd-swp-http-route-*` uses a Traffic Director reserved prefix (`aersvd-`), deleting and recreating `agw-study-egress` in the same region (`us-central1`) leaves the previous `aersvd-swp-http-route-*` route in the shared tenant project (`BKI #16`), which causes subsequent `AGENT_TO_ANYWHERE` bindings in `us-central1` to return `code: 13 (INTERNAL)` during `CreateAgentGatewayMasterTask`.
+> - **What works unaffected in `us-central1`:**
+>   1. **Ingress Agent Gateway (`agw-study-ingress` / `CLIENT_TO_AGENT`)** bound to **`check-gcp-subnet-ips-agw`** (including Model Armor inspection + Service Extensions) works 100% normally and can be bound/unbound/recreated freely at any time.
+>   2. **Unified Access Policy (`uap-policy-agw-study-egress`)** and **Agent Registry (`core-gapi-services` & `check-gcp-subnet-ips-agw`)** work 100% normally.
+>   3. If you need to bind a brand-new `AGENT_TO_ANYWHERE` Egress Gateway after deleting a prior one in `us-central1`, deploy the Egress lab in a clean supported region (such as `asia-southeast1` or `europe-west1`) where the regional tenant project has no orphaned `aersvd-swp-http-route-*` wildcard route.
 
 ---
 
