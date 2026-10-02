@@ -57,13 +57,23 @@ if engines:
   [[ -n "${DISCOVERED_CORE_EP}" ]] && export CORE_GAPI_ENDPOINT_ID="${DISCOVERED_CORE_EP}"
 
   DISCOVERED_AUTO_REG=$(gcloud alpha agent-registry agents list \
-    --location="${REGION}" --project="${PROJECT_ID}" --filter="displayName=check-gcp-subnet-ips-agw" \
+    --location="${REGION}" --project="${PROJECT_ID}" --filter="displayName=check-gcp-subnet-ips-agw AND agentId:reasoningEngines" \
     --format="value(name)" 2>/dev/null | head -n 1 | awk -F'/' '{print $NF}' || true)
   [[ -n "${DISCOVERED_AUTO_REG}" ]] && export SUBNET_AGENT_AUTO_REG_ID="${DISCOVERED_AUTO_REG}"
 
+  DISCOVERED_NET_AUTO_REG=$(gcloud alpha agent-registry agents list \
+    --location="${REGION}" --project="${PROJECT_ID}" --filter="displayName=network-agent-agw" \
+    --format="value(name)" 2>/dev/null | head -n 1 | awk -F'/' '{print $NF}' || true)
+
   DISCOVERED_CUSTOM_REG=$(gcloud alpha agent-registry services describe check-gcp-subnet-ips-agw \
     --location="${REGION}" --project="${PROJECT_ID}" --format="value(registryResource)" 2>/dev/null | awk -F'/' '{print $NF}' || true)
-  [[ -n "${DISCOVERED_CUSTOM_REG}" ]] && export SUBNET_AGENT_CUSTOM_REG_ID="${DISCOVERED_CUSTOM_REG}"
+  if [[ -n "${DISCOVERED_CUSTOM_REG}" ]]; then
+    export SUBNET_AGENT_CUSTOM_REG_ID="${DISCOVERED_CUSTOM_REG}"
+  elif [[ -n "${DISCOVERED_AUTO_REG}" ]]; then
+    # Before Step 3b (custom service creation) is run in a new region, default to SUBNET_AGENT_AUTO_REG_ID
+    # so it never shows a stale UUID from a previous region!
+    export SUBNET_AGENT_CUSTOM_REG_ID="${DISCOVERED_AUTO_REG}"
+  fi
 
   # Persist discovered values back into cfg/env.sh so subsequent `source cfg/env.sh` loads them!
   python3 - "${SCRIPT_DIR}/cfg/env.sh" << PYEOF
@@ -104,11 +114,20 @@ echo "  PROJECT_NUMBER             = ${PROJECT_NUMBER}"
 echo "  ORG_ID                     = ${ORG_ID}"
 echo "  REGION                     = ${REGION}"
 echo "  CLOUD_RUN_REGION           = ${CLOUD_RUN_REGION}"
+echo "  ----------------------------------------------------------------------------"
+echo "  [Target Specialist Agent: check-gcp-subnet-ips-agw (Destination in UAP Rule 2)]"
 echo "  SUBNET_ENGINE_ID           = ${SUBNET_ENGINE_ID}"
-echo "  NETWORK_ENGINE_ID          = ${NETWORK_ENGINE_ID}"
+echo "  SUBNET_AGENT_AUTO_REG_ID   = ${SUBNET_AGENT_AUTO_REG_ID} (auto-registered in Step 1a)"
+echo "  SUBNET_AGENT_CUSTOM_REG_ID = ${SUBNET_AGENT_CUSTOM_REG_ID} (custom service registered in Step 3b)"
+echo "  ----------------------------------------------------------------------------"
+echo "  [Caller Orchestrator Agent: network-agent-agw (Source SPIFFE Principal in UAP Rule 2)]"
+echo "  NETWORK_ENGINE_ID          = ${NETWORK_ENGINE_ID} (used in SPIFFE ID principal)"
+if [[ -n "${DISCOVERED_NET_AUTO_REG:-}" ]]; then
+  echo "  (Info) network-agent-agw Registry UUID = ${DISCOVERED_NET_AUTO_REG} (not used in UAP rules; caller uses SPIFFE ID)"
+fi
+echo "  ----------------------------------------------------------------------------"
+echo "  [Core Google APIs Endpoint (Destination in UAP Rule 1 - registered in Step 3b)]"
 echo "  CORE_GAPI_ENDPOINT_ID      = ${CORE_GAPI_ENDPOINT_ID}"
-echo "  SUBNET_AGENT_AUTO_REG_ID   = ${SUBNET_AGENT_AUTO_REG_ID}"
-echo "  SUBNET_AGENT_CUSTOM_REG_ID = ${SUBNET_AGENT_CUSTOM_REG_ID}"
 echo "=============================================================================="
 
 # 1. cfg/agw-study-egress.yaml

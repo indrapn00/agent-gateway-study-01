@@ -5,7 +5,7 @@
 # VARIABLES TO CHANGE WHEN RE-DEPLOYING TO A NEW PROJECT / REGION:
 #   1. `name`: Egress Agent Gateway name (`AGW_EGRESS_NAME`).
 #      - Example: "agw-study-egress"
-#   2. `registries`: Replace PROJECT_ID ("gcp-demo-02-307713") and REGION ("us-central1")
+#   2. `registries`: Replace PROJECT_ID ("gcp-demo-02-307713") and REGION ("asia-southeast1")
 #      with your target GCP Project ID and Agent Gateway Region.
 #      - Example regional registry: "//agentregistry.googleapis.com/projects/gcp-demo-02-307713/locations/us-central1"
 #      - Example global registry:   "//agentregistry.googleapis.com/projects/gcp-demo-02-307713/locations/global"
@@ -16,5 +16,5 @@ protocols:
 googleManaged:
   governedAccessPath: AGENT_TO_ANYWHERE
 registries:
-- "//agentregistry.googleapis.com/projects/gcp-demo-02-307713/locations/us-central1"
+- "//agentregistry.googleapis.com/projects/gcp-demo-02-307713/locations/asia-southeast1"
 - "//agentregistry.googleapis.com/projects/gcp-demo-02-307713/locations/global"

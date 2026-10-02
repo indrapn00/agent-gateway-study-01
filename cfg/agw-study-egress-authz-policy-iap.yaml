@@ -3,20 +3,20 @@
 # Generated from `cfg/env.sh` via `./render_configs.sh`
 #
 # VARIABLES TO CHANGE WHEN RE-DEPLOYING TO A NEW PROJECT / REGION:
-#   1. `target.resources[0]`: Replace PROJECT_ID ("gcp-demo-02-307713"), REGION ("us-central1"),
+#   1. `target.resources[0]`: Replace PROJECT_ID ("gcp-demo-02-307713"), REGION ("asia-southeast1"),
 #      and AGW_EGRESS_NAME ("agw-study-egress").
 #      - Example: "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress"
 #   2. `customProvider.authzExtension.resources[0]`: Replace PROJECT_ID ("gcp-demo-02-307713"),
-#      REGION ("us-central1"), and AGW_EGRESS_EXT_NAME ("agw-study-egress-iap-authzextension").
+#      REGION ("asia-southeast1"), and AGW_EGRESS_EXT_NAME ("agw-study-egress-iap-authzextension").
 #      - Example: "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-iap-authzextension"
 # ==============================================================================
 name: agw-study-egress-iap-authzpolicy
 target:
   resources:
-  - "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress"
+  - "projects/gcp-demo-02-307713/locations/asia-southeast1/agentGateways/agw-study-egress"
 policyProfile: REQUEST_AUTHZ
 action: CUSTOM
 customProvider:
   authzExtension:
     resources:
-    - "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-iap-authzextension"
+    - "projects/gcp-demo-02-307713/locations/asia-southeast1/authzExtensions/agw-study-egress-iap-authzextension"
