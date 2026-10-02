@@ -528,7 +528,23 @@ To truly see **what changes before and after implementing Agent Gateway**, this 
 
 ---
 
-### Step 0: Prepare Google Cloud Shell (Clone Repo, Install SDKs & Load `cfg/env.sh`)
+### Step 0: Prepare Google Cloud Shell & Choose Your Target GCP Region (`cfg/env.sh`)
+
+> **✅ Validated: Does Changing `REGION` in [`cfg/env.sh`](./cfg/env.sh) Break Any Code in `cfg/`, `check_gcp_subnet_ips/`, or `network_agent/`?**
+> **No — changing `REGION` is 100% safe and non-destructive!** We audited every file in the repository to verify how `REGION` is used:
+> 1. **[`check_gcp_subnet_ips/`](./check_gcp_subnet_ips/agent.py) (Zero Region Dependencies):** Contains **zero** region strings. It uses `GOOGLE_CLOUD_LOCATION="global"` for Gemini 2.5 Flash and pure local Python `ipaddress` math (`calculate_subnet_ips`). No files in `check_gcp_subnet_ips/` are modified or affected when you change regions.
+> 2. **[`network_agent/`](./network_agent/agent.py) (100% Dynamic Region Parsing):** When `deploy_agent.py` deploys `network_agent` in Step 1c (Agent Platform Mode 2) and Step 1e (Cloud Run Mode 3 Web UI), it passes `-e CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID="projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}"`. Inside [`RemoteAgentEngineSubAgent._run_async_impl`](./network_agent/agent.py#L114-L116), `network_agent` dynamically extracts `target_location = parts[3]` directly from that resource string and calls `https://{target_location}-aiplatform.googleapis.com/v1/...:streamQuery`! Meanwhile, the Mode 3 Cloud Run Web UI stays in `CLOUD_RUN_REGION="asia-southeast2"` and seamlessly calls your new `${REGION}` on Agent Platform.
+> 3. **[`cfg/`](./cfg/) & [`render_configs.sh`](./render_configs.sh) (Deterministic Template Generator):** `render_configs.sh` is a clean template generator that reads `cfg/env.sh` and rewrites the 8 `.yaml`/`.json` files in `cfg/` (updating `locations/${REGION}` and `service: modelarmor.${REGION}.rep.googleapis.com`). You can switch `REGION` back and forth between `us-central1`, `asia-southeast1`, `us-east1`, etc. anytime and run `./render_configs.sh` without corrupting any files.
+>
+> **Supported Regions for `REGION` in [`cfg/env.sh`](./cfg/env.sh)** *(all 4 APIs verified: Agent Engine, Agent Gateway, Model Armor, Agent Registry)*:
+> - **`asia-southeast1`** (Singapore — **Recommended clean region** if `us-central1` hit `BKI #16`)
+> - **`asia-northeast1`** (Tokyo)
+> - **`us-central1`** (Iowa — default in `cfg/env.sh`)
+> - **`us-east1`** (South Carolina)
+> - **`us-west1`** (Oregon)
+> - **`europe-west1`** (Belgium)
+> - **`europe-west4`** (Netherlands)
+
 Run this block in **Google Cloud Shell** (`indra@cloudshell:~`):
 
 ```bash
@@ -543,10 +559,17 @@ git checkout -- . && git pull origin main
 pip install -q "google-cloud-aiplatform>=1.93.0" requests
 export PATH="$HOME/.local/bin:$PATH"
 
-# 0c. Load environment variables
-source cfg/env.sh
+# 0c. (OPTIONAL) Change the GCP Region in cfg/env.sh (e.g., to "asia-southeast1" if "us-central1" hit BKI #16)
+#     If you want to stay in us-central1, skip the `sed` line below.
+#     To switch to Singapore (asia-southeast1), uncomment or run:
+# sed -i 's/^export REGION=.*/export REGION="asia-southeast1"/' cfg/env.sh
 
-# 0d. Ensure the Vertex AI Reasoning Engine Service Agent has roles/aiplatform.user to invoke sub-agents
+# 0d. Render all 8 configuration files in cfg/ for your chosen REGION and load cfg/env.sh
+./render_configs.sh
+source cfg/env.sh
+echo "Active Lab Region: ${REGION} (Cloud Run Web UI Region: ${CLOUD_RUN_REGION})"
+
+# 0e. Ensure the Vertex AI Reasoning Engine Service Agent has roles/aiplatform.user to invoke sub-agents
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
   --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com" \
   --role="roles/aiplatform.user"
@@ -646,13 +669,13 @@ curl -s -X POST \
 
 Now let's put an **Ingress Agent Gateway (`agw-study-ingress`)** with **Model Armor (`CONTENT_AUTHZ`)** in front of `check-gcp-subnet-ips-agw` and run the exact same test!
 
-#### Step 2a: Create or Verify the Model Armor Template (`us-central1`)
+#### Step 2a: Create or Verify the Model Armor Template (in `${REGION}`)
 - **Using Google Cloud Console UI (Preferred):**
   1. Go to **Security $\rightarrow$ Model Armor $\rightarrow$ Templates**.
-  2. If `agw-study-ingress-modar-req-template` (`us-central1`) already exists, keep it and skip to **Step 2b**.
+  2. If `agw-study-ingress-modar-req-template` already exists in your target **`${REGION}`** (e.g., `us-central1` or `asia-southeast1`), keep it and skip to **Step 2b**.
   3. Otherwise, click **Create Template**:
      - **Template ID:** `agw-study-ingress-modar-req-template`
-     - **Region:** `us-central1`
+     - **Region:** Select your **`${REGION}`** from `cfg/env.sh` (e.g., `us-central1` or `asia-southeast1`)
      - **Detection settings:** Enable **Prompt injection and jailbreak detection** (`Low and above`) and **Responsible AI** filters.
      - **Enforcement mode:** Select **Inspect and block** (custom error code `799`).
      - Click **Create**.
@@ -677,15 +700,15 @@ Now let's put an **Ingress Agent Gateway (`agw-study-ingress`)** with **Model Ar
 #### Step 2b: Create the Ingress Agent Gateway (`CLIENT_TO_AGENT`) + AI Security (Understanding the 3 `cfg/` Files Created Here!)
 When you create the Ingress Gateway with AI Security enabled, you are configuring **3 resources** defined in `cfg/`:
 1. **[`cfg/agw-study-ingress.yaml`](./cfg/agw-study-ingress.yaml)** (*The Proxy*): Sets `governedAccessPath: CLIENT_TO_AGENT` (inbound Reverse Proxy).
-2. **[`cfg/agw-study-ingress-svc-ext-modar.yaml`](./cfg/agw-study-ingress-svc-ext-modar.yaml)** (*The Model Armor Callout*): Calls `service: modelarmor.us-central1.rep.googleapis.com` with `forwardHeaders: [authorization]`, `failOpen: false`, and your `request_template_id` / `response_template_id`.
+2. **[`cfg/agw-study-ingress-svc-ext-modar.yaml`](./cfg/agw-study-ingress-svc-ext-modar.yaml)** (*The Model Armor Callout*): Calls `service: modelarmor.${REGION}.rep.googleapis.com` with `forwardHeaders: [authorization]`, `failOpen: false`, and your `request_template_id` / `response_template_id`.
 3. **[`cfg/agw-study-ingress-authz-policy-modar.yaml`](./cfg/agw-study-ingress-authz-policy-modar.yaml)** (*The Wiring Rule*): Connects `target: agw-study-ingress` at stage `policyProfile: CONTENT_AUTHZ` (HTTP body/prompt inspection) to `authzExtension: agw-study-ingress-aisecurity-authzextension`.
 
 - **Using Google Cloud Console UI (Preferred — Creates all 3 resources in one click!):**
   1. Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways** $\rightarrow$ click **Create Gateway**.
   2. **Name:** `agw-study-ingress`
-  3. **Region:** `us-central1`
+  3. **Region:** Select your **`${REGION}`** from `cfg/env.sh` (e.g., `us-central1` or `asia-southeast1`)
   4. **Governed access path:** Select **Client-to-Agent (ingress)**.
-  5. **AI Security (Model Armor):** Toggle **Enable AI Security** ON and select **`agw-study-ingress-modar-req-template`** for both the Request and Response templates.
+  5. **AI Security (Model Armor):** Toggle **Enable AI Security** ON and select **`agw-study-ingress-modar-req-template`** (in `${REGION}`) for both the Request and Response templates.
   6. Click **Create**. *(The UI automatically creates `agw-study-ingress`, `agw-study-ingress-aisecurity-authzextension`, and `agw-study-ingress-aisecurity-authzpolicy`!)*
   7. **Important 1-Time Cloud Shell Update after UI Creation:** Because the UI wizard sets `failOpen: true` and omits `forwardHeaders: ["authorization"]` on `agw-study-ingress-aisecurity-authzextension`, run these two commands in Cloud Shell so the gateway forwards the OAuth token to Model Armor and blocks unsafe prompts (`failOpen: false`):
      ```bash
@@ -734,7 +757,7 @@ When you create the Ingress Gateway with AI Security enabled, you are configurin
 >   1. Go to **Vertex AI $\rightarrow$ Agent Builder $\rightarrow$ Agent Engine** ([`https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gcp-demo-02-307713`](https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gcp-demo-02-307713)).
 >   2. Click on your agent (**`check-gcp-subnet-ips-agw`** or **`network-agent-agw`**).
 >   3. Click **`Update service configuration`** (gear icon in the top bar) $\rightarrow$ switch to the **`Deployment details`** tab.
->   4. Under **`Deployment spec`**, look at the read-only **`Ingress`** and **`Egress`** rows showing `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/...`.
+>   4. Under **`Deployment spec`**, look at the read-only **`Ingress`** and **`Egress`** rows showing `projects/gcp-demo-02-307713/locations/${REGION}/agentGateways/...`.
 > - *(Contrast with **Gemini Enterprise Apps**: Unlike Agent Engine, a **Gemini Enterprise** application like `gcp2-ge-demo-01` **does** have an editable UI input field for `defaultEgressAgentGateway` under **AI Applications $\rightarrow$ `<app>` $\rightarrow$ Security $\rightarrow$ Configuration**.)*
 
 You can bind your already-running `check-gcp-subnet-ips-agw` (`${SUBNET_ENGINE_ID}`) to `agw-study-ingress` **in-place in ~30 seconds** without changing `SUBNET_ENGINE_ID` (so you don't even have to re-deploy `network-agent-agw`!):
@@ -809,16 +832,16 @@ curl -s -X POST \
 
 ##### 3a. Create `agw-study-egress` (`AGENT_TO_ANYWHERE`) + IAP Access Authorization (Understanding the 3 `cfg/` Files Created Here!)
 When you create the Egress Gateway with IAP Access Authorization enabled, you are configuring **3 resources** defined in `cfg/`:
-1. **[`cfg/agw-study-egress.yaml`](./cfg/agw-study-egress.yaml)** (*The Outbound Forward Proxy*): Sets `governedAccessPath: AGENT_TO_ANYWHERE` and links `registries:` (`us-central1` and `global` Agent Registries) so the proxy can map outbound destination URLs to Agent Registry entries.
+1. **[`cfg/agw-study-egress.yaml`](./cfg/agw-study-egress.yaml)** (*The Outbound Forward Proxy*): Sets `governedAccessPath: AGENT_TO_ANYWHERE` and links `registries:` (`${REGION}` and `global` Agent Registries) so the proxy can map outbound destination URLs to Agent Registry entries.
 2. **[`cfg/agw-study-egress-svc-ext-iap.yaml`](./cfg/agw-study-egress-svc-ext-iap.yaml)** (*The IAP v2 Callout*): Calls `service: iap.googleapis.com` with `failOpen: false` (`Enforce` mode) and `metadata.iapPolicyVersion: "V2"` (Unified Access Policy).
 3. **[`cfg/agw-study-egress-authz-policy-iap.yaml`](./cfg/agw-study-egress-authz-policy-iap.yaml)** (*The Wiring Rule*): Connects `target: agw-study-egress` at stage `policyProfile: REQUEST_AUTHZ` (request/identity authorization) to `authzExtension: agw-study-egress-iap-authzextension`.
 
 - **Using Google Cloud Console UI (Preferred — Creates all 3 resources in one click!):**
   1. Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways** $\rightarrow$ click **Create Gateway**.
   2. **Name:** `agw-study-egress`
-  3. **Region:** `us-central1`
+  3. **Region:** Select your **`${REGION}`** from `cfg/env.sh` (e.g., `us-central1` or `asia-southeast1`)
   4. **Governed access path:** Select **Agent-to-Anywhere (egress)**.
-  5. **Registries:** Select your `us-central1` and `global` Agent Registries.
+  5. **Registries:** Select your **`${REGION}`** (e.g., `us-central1` or `asia-southeast1`) and **`global`** Agent Registries.
   6. **Access authorization:** Select **Enforce** (or **Audit only**) and **Unified Access Policy (recommended)**.
   7. Click **Create**. *(The UI automatically creates `agw-study-egress`, `agw-study-egress-iap-authzextension`, and `agw-study-egress-iap-authzpolicy`.)*
   8. **Important 1-Time Cloud Shell Update after UI Creation:** Just like the Ingress UI wizard, the Console UI wizard creates `agw-study-egress-iap-authzextension` with **`failOpen: true`** by default! Run this command in Cloud Shell to set **`failOpen: false`** (so unauthorized outbound traffic is strictly blocked):

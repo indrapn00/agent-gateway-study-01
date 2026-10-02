@@ -231,6 +231,42 @@ Open [`cfg/env.sh`](./env.sh), update the variables with your new values, and ru
 ./render_configs.sh
 ```
 
+### 1.3 Step-by-Step Guide to Change the GCP Region Safely (And Why It Never Breaks `cfg/`, `check_gcp_subnet_ips/`, or `network_agent/`)
+
+If you want to deploy the lab in a different region (for example, switching from `us-central1` to **`asia-southeast1`** to avoid Preview Bug `BKI #16` on Egress Agent Gateway):
+
+#### ✅ Validation: Does Changing `REGION` Break Any Code in `cfg/`, `check_gcp_subnet_ips/`, or `network_agent/`?
+**No — changing `REGION` in [`cfg/env.sh`](./env.sh) is 100% safe and non-destructive:**
+1. **[`check_gcp_subnet_ips/`](../check_gcp_subnet_ips/agent.py) (Zero Region Dependencies):** Contains **zero** region strings. It uses `GOOGLE_CLOUD_LOCATION="global"` for Gemini 2.5 Flash and pure local Python `ipaddress` math (`calculate_subnet_ips`). Nothing in `check_gcp_subnet_ips/` is touched or broken when you change regions.
+2. **[`network_agent/`](../network_agent/agent.py) (Dynamic Region Extraction):** When `deploy_agent.py` deploys `network_agent` in Mode 2 (Agent Platform) and Mode 3 (Cloud Run Web UI), it passes `-e CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID="projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}"`. Inside [`RemoteAgentEngineSubAgent._run_async_impl`](../network_agent/agent.py#L114-L116), `network_agent` dynamically extracts `target_location = parts[3]` directly from that resource string and calls `https://{target_location}-aiplatform.googleapis.com/v1/...:streamQuery`! Meanwhile, the Mode 3 Cloud Run Web UI stays in `CLOUD_RUN_REGION="asia-southeast2"` and seamlessly calls your new `${REGION}` on Agent Platform.
+3. **[`cfg/`](./) & [`render_configs.sh`](../render_configs.sh) (Deterministic Template Generator):** `render_configs.sh` reads `cfg/env.sh` and cleanly re-renders all 8 `.yaml`/`.json` files in `cfg/` (updating `locations/${REGION}` and `service: modelarmor.${REGION}.rep.googleapis.com`). You can switch `REGION` back and forth between `us-central1` and `asia-southeast1` anytime and run `./render_configs.sh` without corrupting any files.
+
+#### Supported Regions for `REGION` in [`cfg/env.sh`](./env.sh)
+All 4 required regional APIs (`ReasoningEngine`, `AgentGateway`, `ModelArmor`, `AgentRegistry`) are verified active (`HTTP 200`) in:
+- **`asia-southeast1`** (Singapore — **Recommended clean region** closest to Indonesia)
+- **`asia-northeast1`** (Tokyo)
+- **`us-central1`** (Iowa — default)
+- **`us-east1`** (South Carolina)
+- **`us-west1`** (Oregon)
+- **`europe-west1`** (Belgium)
+- **`europe-west4`** (Netherlands)
+
+#### Exact Step-by-Step Commands to Change Region (Example: `asia-southeast1`)
+```bash
+cd "$HOME/agent-gateway-study-01"
+
+# Step 1: Change REGION in cfg/env.sh (e.g., to asia-southeast1)
+sed -i 's/^export REGION=.*/export REGION="asia-southeast1"/' cfg/env.sh
+
+# Step 2: Re-render all 8 YAML/JSON files in cfg/ for the new region and reload env.sh
+./render_configs.sh
+source cfg/env.sh
+
+# Step 3: Verify that all cfg/ files now point to your new REGION
+grep -n "${REGION}" cfg/*.yaml
+```
+Then simply follow **Section 7 (Steps 1 $\rightarrow$ 4)** in [`study-notes.md`](../study-notes.md) as normal! Every `gcloud`, `curl`, and `python3 deploy_agent.py` command uses `"${REGION}"` automatically.
+
 ---
 
 ## 2. Complete Checklist of Variables (Including "Hidden" Static Values!)

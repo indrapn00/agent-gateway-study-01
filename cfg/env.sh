@@ -41,11 +41,19 @@ export ORG_ID="304553879287"
 # ------------------------------------------------------------------------------
 
 # [CHANGE ME]: Region for Agent Gateway, Model Armor, Agent Registry, and Agent Platform.
-#   - IMPORTANT: Must be a region that supports BOTH `agentGateways` AND `modelarmor`
-#     (e.g., "us-central1" or "asia-southeast1"). Note: "asia-southeast2" is not yet enabled.
-#   - Used in: All `cfg/*.yaml` paths AND the regional Model Armor service hostname
-#     (`modelarmor.${REGION}.rep.googleapis.com`).
-#   - Example: "us-central1" (or "asia-southeast1")
+#   - IMPORTANT: Must be a region that supports ALL 4 APIs: `ReasoningEngine`,
+#     `agentGateways`, `modelarmor`, and `agentregistry`.
+#   - Verified Supported Regions:
+#       * "asia-southeast1" (Singapore - Recommended clean region if us-central1 hit BKI #16)
+#       * "asia-northeast1" (Tokyo)
+#       * "us-central1"     (Iowa - Default)
+#       * "us-east1"        (South Carolina)
+#       * "us-west1"        (Oregon)
+#       * "europe-west1"    (Belgium)
+#       * "europe-west4"    (Netherlands)
+#     (Note: "asia-southeast2" is only used for CLOUD_RUN_REGION below.)
+#   - After changing REGION below, run:
+#       ./render_configs.sh && source cfg/env.sh
 export REGION="us-central1"
 
 # [CHANGE ME]: Region for Cloud Run deployments (Mode 1 & Mode 3 Web UI).
