@@ -920,11 +920,16 @@ source cfg/env.sh
 
 Run this command in Cloud Shell to bind **`network-agent-agw` (`${NETWORK_ENGINE_ID}`)** to **`agw-study-egress`** (`agentToAnywhereConfig`) in-place (preserving the same `NETWORK_ENGINE_ID`):
 
+> **⏳ Why Does Egress Gateway Binding Take ~4–5 Minutes on the First Bind in a Region (Whereas Ingress Takes ~30 Seconds)?**
+> - **Ingress (`CLIENT_TO_AGENT`)** only updates a routing rule on Vertex AI's frontend proxy (~30 seconds).
+> - **Egress (`AGENT_TO_ANYWHERE`)** on its **first bind in a region** triggers Vertex AI's `CreateAgentGatewayMasterTask` to provision an entire dedicated **Secure Web Proxy (SWP)** networking stack inside your regional tenant project (a `240.0.0.0/4` VPC, Subnet, Cloud DNS wildcard response policy `*`, PSC attachment, and SWP `aersvd-swp-http-route-agw-*` routes) and then rolls out a new container revision wired into that VPC.
+> - While the `UpdateReasoningEngineOperation` is still running (`~4.5 minutes`), the Console UI's **`Deployment details`** tab will continue to show **`Agent to Anywhere (Egress): —`**. As soon as the operation finishes (`"done": true`), refreshing the UI will display `projects/.../locations/${REGION}/agentGateways/agw-study-egress`!
+
 ```bash
 cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 
-# Option A: Bind network-agent-agw (NETWORK_ENGINE_ID) in-place via REST PATCH:
-curl -s -X PATCH \
+# Option A: Bind network-agent-agw (NETWORK_ENGINE_ID) in-place via REST PATCH and wait until done (~4.5 mins):
+OP_NAME=$(curl -s -X PATCH \
   -H "Authorization: Bearer $(gcloud auth print-access-token)" \
   -H "Content-Type: application/json" \
   "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" \
@@ -938,9 +943,22 @@ curl -s -X PATCH \
         }
       }
     }
-  }"
+  }" | python3 -c "import sys, json; print(json.load(sys.stdin).get('name', ''))")
 
-# Or Option B: Bind via deploy_agent.py --update-existing (keeps the same NETWORK_ENGINE_ID):
+echo "Started Egress Gateway binding operation: ${OP_NAME}"
+while true; do
+  STATUS_JSON=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+    "https://${REGION}-aiplatform.googleapis.com/v1beta1/${OP_NAME}")
+  DONE=$(echo "${STATUS_JSON}" | python3 -c "import sys, json; print(json.load(sys.stdin).get('done', False))")
+  if [[ "${DONE}" == "True" ]]; then
+    echo "✅ Egress Gateway binding completed!"
+    break
+  fi
+  echo "⏳ Still provisioning regional SWP Egress stack... waiting 15s"
+  sleep 15
+done
+
+# Or Option B: Bind via deploy_agent.py --update-existing (automatically polls until done):
 python3 deploy_agent.py \
   --project "${PROJECT_ID}" \
   --region "${REGION}" \
@@ -954,7 +972,7 @@ python3 deploy_agent.py \
   -e SUBNET_AGENT_TARGET=agent_platform \
   -e CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID="projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}"
 ```
-After this command completes, open **Agent Platform $\rightarrow$ Deployments $\rightarrow$ `network-agent-agw` $\rightarrow$ Update service configuration $\rightarrow$ Deployment details** in the Console UI and verify that **`Agent to Anywhere (Egress)`** shows `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress`.
+After this command completes, refresh **Agent Platform $\rightarrow$ Deployments $\rightarrow$ `network-agent-agw` $\rightarrow$ Update service configuration $\rightarrow$ Deployment details** in the Console UI and verify that **`Agent to Anywhere (Egress)`** shows `projects/gcp-demo-02-307713/locations/${REGION}/agentGateways/agw-study-egress`.
 
 > [!CAUTION]
 > ### ⚠️ Critical Preview Bug (`BKI #16`) When Deleting & Re-Deploying an Egress Agent Gateway (`AGENT_TO_ANYWHERE`) in the Same Region
