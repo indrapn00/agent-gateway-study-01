@@ -727,6 +727,16 @@ When you create the Ingress Gateway with AI Security enabled, you are configurin
   ```
 
 #### Step 2c: Bind `check-gcp-subnet-ips-agw` to `agw-study-ingress` (Fast 30-Second In-Place Bind!)
+
+> **💡 Can you bind a Vertex AI Agent Engine (`ReasoningEngine`) to an Agent Gateway via the Google Cloud Console UI?**
+> - **Binding / Editing (`Read-Write`) — CLI / API Only for Agent Engine:** No, for **Vertex AI Agent Engine** (`ReasoningEngine` resources like `check-gcp-subnet-ips-agw` and `network-agent-agw`), the Google Cloud Console UI does **not** currently have an input field or dropdown to set or edit `spec.deploymentSpec.agentGatewayConfig` (`clientToAgentConfig` or `agentToAnywhereConfig`). In the UI, the **Update service configuration** drawer only allows editing **Containers** (scaling/CPU/memory), **Observability**, **Permissions**, and **Memory Bank**. Therefore, binding or unbinding an Agent Engine to an Agent Gateway **must** be done via `deploy_agent.py` (`--agent-gateway-ingress` / `--agent-gateway-egress`) or the Vertex AI REST API (`PATCH` below).
+> - **Viewing (`Read-Only`) in the Console UI — Supported!** Once bound, you **can** verify the Ingress and Egress Agent Gateway bindings in the Console UI:
+>   1. Go to **Vertex AI $\rightarrow$ Agent Builder $\rightarrow$ Agent Engine** ([`https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gcp-demo-02-307713`](https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=gcp-demo-02-307713)).
+>   2. Click on your agent (**`check-gcp-subnet-ips-agw`** or **`network-agent-agw`**).
+>   3. Click **`Update service configuration`** (gear icon in the top bar) $\rightarrow$ switch to the **`Deployment details`** tab.
+>   4. Under **`Deployment spec`**, look at the read-only **`Ingress`** and **`Egress`** rows showing `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/...`.
+> - *(Contrast with **Gemini Enterprise Apps**: Unlike Agent Engine, a **Gemini Enterprise** application like `gcp2-ge-demo-01` **does** have an editable UI input field for `defaultEgressAgentGateway` under **AI Applications $\rightarrow$ `<app>` $\rightarrow$ Security $\rightarrow$ Configuration**.)*
+
 You can bind your already-running `check-gcp-subnet-ips-agw` (`${SUBNET_ENGINE_ID}`) to `agw-study-ingress` **in-place in ~30 seconds** without changing `SUBNET_ENGINE_ID` (so you don't even have to re-deploy `network-agent-agw`!):
 
 ```bash
