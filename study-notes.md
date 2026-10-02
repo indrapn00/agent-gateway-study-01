@@ -1068,6 +1068,11 @@ curl -s -X POST \
 ##### 4c. State 2 ("AFTER Rule 2" — Explicit SPIFFE Allow using [`cfg/uap-rules-allow-subnet.json`](./cfg/uap-rules-allow-subnet.json))
 Now update `uap-policy-agw-study-egress` with **`cfg/uap-rules-allow-subnet.json`**, which adds **Rule 2** authorizing **ONLY** `network-agent-agw`'s individual SPIFFE identity (`principal://agents.global.org-${ORG_ID}.system.id.goog/resources/aiplatform/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}`) to call `check-gcp-subnet-ips-agw`, and re-test:
 
+> **⏳ Important Note on IAM v3 UAP + IAP v2 Cache Propagation (~90–120 Seconds):**
+> When you update a global IAM v3 Unified Access Policy (`gcloud iam access-policies update`), Google Cloud's global IAP v2 enforcement engine (`iap.googleapis.com`) caches policy decisions for **~90 to 120 seconds**.
+> - If you run the test query within the first ~60–90 seconds after updating the policy in Step 4c, IAP v2 may still serve the cached **Step 4b (`DENY`)** decision (`[Agent Gateway Policy Block - HTTP 403]: Egress request is not authorized`).
+> - Waiting ~90 seconds (or using the automatic retry loop below) ensures the IAP v2 cache refreshes and evaluates **Rule 2 (`ALLOW`)**!
+
 ```bash
 cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 
@@ -1079,22 +1084,30 @@ gcloud iam access-policies update "projects/${PROJECT_ID}/locations/global/acces
   --details-rules=cfg/uap-rules-allow-subnet.json \
   --etag="${ETAG}"
 
-# Wait ~15 seconds for IAM v3 UAP propagation, then re-test:
-sleep 15
-
 # 2. [TEST STATE 2 - AFTER RULE 2 (Explicit SPIFFE Allow)]
-# ✅ OBSERVE: Now IAP v2 matches network-agent-agw's SPIFFE ID against Rule 2 and ALLOWS the call!
-curl -s -X POST \
-  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  -H "Content-Type: application/json" \
-  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}:streamQuery" \
-  -d '{
-    "class_method": "stream_query",
-    "input": {
-      "user_id": "indra-uap-after-rule2",
-      "message": "How many usable IPs are in 10.10.0.0/28 in GCP?"
-    }
-  }'
+# Wait for IAM v3 UAP -> IAP v2 cache propagation (~90s) and automatically test until Rule 2 is active:
+for attempt in {1..8}; do
+  echo "=== Attempt ${attempt}: Testing Egress Gateway after adding UAP Rule 2 ==="
+  RESP=$(curl -s -X POST \
+    -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+    -H "Content-Type: application/json" \
+    "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}:streamQuery" \
+    -d '{
+      "class_method": "stream_query",
+      "input": {
+        "user_id": "indra-uap-after-rule2",
+        "message": "How many usable IPs are in 10.10.0.0/28 in GCP?"
+      }
+    }')
+  if echo "${RESP}" | grep -q "Egress request is not authorized"; then
+    echo "⏳ IAP v2 cache still propagating Rule 2 (takes ~90s)... waiting 15s"
+    sleep 15
+  else
+    echo "✅ SUCCESS! IAP v2 matched network-agent-agw SPIFFE ID against Rule 2 and ALLOWED the call:"
+    echo "${RESP}"
+    break
+  fi
+done
 ```
 - **What Changes in State 2 (`cfg/uap-rules-allow-subnet.json`):**
   - Refresh [`uap-policy-agw-study-egress` in the Console UI](https://console.cloud.google.com/iam-admin/iam/access-policies?project=gcp-demo-02-307713): you now see **Rule 2** explicitly matching `network-agent-agw`'s SPIFFE ID (`.../reasoningEngines/${NETWORK_ENGINE_ID}`) and destination Agent Registry entry `check-gcp-subnet-ips-agw`!
