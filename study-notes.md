@@ -1265,3 +1265,38 @@ If you prefer using the **Google Cloud Console UI** for re-deploying the Agent G
 5. **Step 4 (CLI — Required Only for Deploying Python Agent Code with `agentGatewayConfig`):**
    - Because Vertex AI Agent Engine (`ReasoningEngine`) source deployments require packaging your Python code (`check_gcp_subnet_ips` and `network_agent`) with `identity_type="AGENT_IDENTITY"` and `agentGatewayConfig`, run `deploy_agent.py` (see Step 2 & Step 3c in Section 7 above) and then run `./render_configs.sh --auto-discover` to update `cfg/env.sh` with any new random `ReasoningEngine` IDs!
 
+---
+
+### 10.3 How to Deploy This Lab in a Different Supported Region (Other Than `us-central1`)
+
+Because this lab uses **4 regional Google Cloud services together** (**Vertex AI Agent Engine**, **Agent Gateway**, **Model Armor**, and **Agent Registry**), your chosen `REGION` in [`cfg/env.sh`](./cfg/env.sh) must support all 4 APIs.
+
+#### Verified Supported Regions for This Lab
+
+| Region | Location | Vertex AI Agent Engine (`ReasoningEngine`) | Agent Gateway (`agentGateways`) | Model Armor (`modelarmor.<region>.rep.googleapis.com`) | Agent Registry (`agentregistry`) | Status for Full Lab (`REGION` in `cfg/env.sh`) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **`asia-southeast1`** | Singapore | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Recommended clean region closest to Indonesia** |
+| **`asia-northeast1`** | Tokyo | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`us-central1`** | Iowa | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Default region** *(Note: hit `BKI #16` on Egress after gateway re-create)* |
+| **`us-east1`** | South Carolina | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`us-west1`** | Oregon | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`europe-west1`** | Belgium | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`europe-west4`** | Netherlands | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`asia-southeast2`** | Jakarta | ✅ (`200`) | ❌ (`501`) | ❌ | ❌ | ⚠️ **Cloud Run Mode 3 Web UI only (`CLOUD_RUN_REGION`)** |
+
+#### Step-by-Step Guide to Deploy in Another Region (Example: `asia-southeast1`)
+
+1. **Step 1 — Update `REGION` in [`cfg/env.sh`](./cfg/env.sh) and Re-Render `cfg/`:**
+   ```bash
+   cd "$HOME/agent-gateway-study-01"
+   sed -i 's/^export REGION=.*/export REGION="asia-southeast1"/' cfg/env.sh
+   ./render_configs.sh
+   source cfg/env.sh
+   ```
+   *(What `./render_configs.sh` updates automatically: all 8 files in `cfg/` now point to `locations/asia-southeast1` and `modelarmor.asia-southeast1.rep.googleapis.com`! Meanwhile, `CLOUD_RUN_REGION` stays `asia-southeast2` for your Cloud Run Web UI.)*
+
+2. **Step 2 — Follow Section 7 (Steps 1 to 4) Using Your New `${REGION}` (`asia-southeast1`):**
+   - **Every CLI command in Section 7** already uses `${REGION}` from `cfg/env.sh`, so you can copy-paste them directly without changing any command flags!
+   - **For the Console UI steps in Section 7** (creating the Model Armor Template `agw-study-ingress-modar-req-template`, Ingress Gateway `agw-study-ingress`, and Egress Gateway `agw-study-egress`), simply select **`asia-southeast1`** (your new `${REGION}`) in the Console UI **Region** dropdown!
+   - Remember **Golden Rule #1**: once `agw-study-egress` is bound to `network-agent-agw` in `asia-southeast1`, **keep `agw-study-egress` alive** (do not delete it) so you can toggle UAP rules (`cfg/uap-rules.json` vs. `cfg/uap-rules-allow-subnet.json`) and test Egress as many times as you like without hitting `BKI #16`.
+

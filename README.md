@@ -113,6 +113,114 @@ When you move to a **different GCP Project**, **different Organization**, **diff
 > 2. **Golden Rule #2 (If a region's tenant project is already stuck with `BKI #16`, switch `REGION` in `cfg/env.sh`):**
 >    Edit **one line** in **[`cfg/env.sh`](./cfg/env.sh)** (`export REGION="asia-southeast1"` or `export REGION="us-east1"`), run `./render_configs.sh && source cfg/env.sh`, and deploy the full lab in that clean region.
 
+### 1.5.1 How to Deploy This Lab in a Different Supported Region (Other Than `us-central1`)
+
+Because this lab uses **4 regional Google Cloud services together** (**Vertex AI Agent Engine**, **Agent Gateway**, **Model Armor**, and **Agent Registry**), your chosen `REGION` in [`cfg/env.sh`](./cfg/env.sh) must support all 4 APIs.
+
+#### Verified Supported Regions for This Lab
+
+| Region | Location | Vertex AI Agent Engine (`ReasoningEngine`) | Agent Gateway (`agentGateways`) | Model Armor (`modelarmor.<region>.rep.googleapis.com`) | Agent Registry (`agentregistry`) | Status for Full Lab (`REGION` in `cfg/env.sh`) |
+| :--- | :--- | :---: | :---: | :---: | :---: | :--- |
+| **`asia-southeast1`** | Singapore | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Recommended clean region closest to Indonesia** |
+| **`asia-northeast1`** | Tokyo | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`us-central1`** | Iowa | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Default region** *(Note: hit `BKI #16` on Egress after gateway re-create)* |
+| **`us-east1`** | South Carolina | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`us-west1`** | Oregon | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`europe-west1`** | Belgium | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`europe-west4`** | Netherlands | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ (`200`) | ✅ **Supported** |
+| **`asia-southeast2`** | Jakarta | ✅ (`200`) | ❌ (`501`) | ❌ | ❌ | ⚠️ **Cloud Run Mode 3 Web UI only (`CLOUD_RUN_REGION`)** |
+
+#### Step-by-Step Guide to Deploy in Another Region (Example: `asia-southeast1`)
+
+1. **Step 1 — Update `REGION` in [`cfg/env.sh`](./cfg/env.sh) and Re-Render `cfg/`:**
+   ```bash
+   cd "$HOME/agent-gateway-study-01"
+   sed -i 's/^export REGION=.*/export REGION="asia-southeast1"/' cfg/env.sh
+   ./render_configs.sh
+   source cfg/env.sh
+   ```
+   *(What `./render_configs.sh` updates automatically: all 8 files in `cfg/` now point to `locations/asia-southeast1` and `modelarmor.asia-southeast1.rep.googleapis.com`! Meanwhile, `CLOUD_RUN_REGION` stays `asia-southeast2` for your Cloud Run Web UI.)*
+
+2. **Step 2 — Deploy the Two Agents in the New Region (`${REGION}`):**
+   ```bash
+   # 2a. Deploy Specialist Agent (check-gcp-subnet-ips-agw) in ${REGION}
+   python3 deploy_agent.py \
+     --project "${PROJECT_ID}" \
+     --region "${REGION}" \
+     --src-dir ./check_gcp_subnet_ips \
+     --display-name "check-gcp-subnet-ips-agw" \
+     --enable-agent-identity \
+     --allow-token-sharing \
+     --enable-telemetry
+   source cfg/env.sh
+
+   # 2b. Deploy Orchestrator Agent (network-agent-agw) in ${REGION}
+   python3 deploy_agent.py \
+     --project "${PROJECT_ID}" \
+     --region "${REGION}" \
+     --src-dir ./network_agent \
+     --display-name "network-agent-agw" \
+     --enable-agent-identity \
+     --allow-token-sharing \
+     --enable-telemetry \
+     -e SUBNET_AGENT_TARGET=agent_platform \
+     -e CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID="projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}"
+   source cfg/env.sh
+   ```
+
+3. **Step 3 — Create the Gateways & Model Armor Template in `${REGION}` (Console UI + 1-Line Extension Import):**
+   - **In the Console UI**, make sure you select **`asia-southeast1`** (your new `${REGION}`) in the **Region** dropdown when creating:
+     1. **Security $\rightarrow$ Model Armor $\rightarrow$ Templates:** `agw-study-ingress-modar-req-template` (Region: **`asia-southeast1`**).
+     2. **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways:** `agw-study-ingress` (Region: **`asia-southeast1`**, Client-to-Agent, AI Security ON).
+     3. **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways:** `agw-study-egress` (Region: **`asia-southeast1`**, Agent-to-Anywhere, Registries: `asia-southeast1` + `global`, Access authorization: Enforce + UAP).
+   - **Then run the two extension imports in Cloud Shell** (so `failOpen: false` and `forwardHeaders: ["authorization"]` are set in `${REGION}`):
+     ```bash
+     gcloud beta service-extensions authz-extensions import "${AGW_INGRESS_EXT_NAME}" \
+       --source=cfg/agw-study-ingress-svc-ext-modar.yaml --location="${REGION}" --project="${PROJECT_ID}"
+     gcloud beta service-extensions authz-extensions import "${AGW_EGRESS_EXT_NAME}" \
+       --source=cfg/agw-study-egress-svc-ext-iap.yaml --location="${REGION}" --project="${PROJECT_ID}"
+     ```
+
+4. **Step 4 — Register Custom Services in `${REGION}`, Bind Gateways, and Auto-Discover UUIDs:**
+   ```bash
+   # 4a. Register core-gapi-services and check-gcp-subnet-ips-agw in Agent Registry (${REGION})
+   gcloud alpha agent-registry services create core-gapi-services \
+     --location="${REGION}" --project="${PROJECT_ID}" \
+     --display-name="Core Google APIs" \
+     --endpoint-spec-type=no-spec \
+     --interfaces="[{\"url\":\"googleapis.com\",\"protocolBinding\":\"GRPC\"},{\"url\":\"${REGION}-aiplatform.googleapis.com\",\"protocolBinding\":\"HTTP_JSON\"},{\"url\":\"aiplatform.googleapis.com\",\"protocolBinding\":\"HTTP_JSON\"},{\"url\":\"oauth2.googleapis.com\",\"protocolBinding\":\"HTTP_JSON\"},{\"url\":\"sts.googleapis.com\",\"protocolBinding\":\"HTTP_JSON\"},{\"url\":\"iamcredentials.googleapis.com\",\"protocolBinding\":\"HTTP_JSON\"},{\"url\":\"cloudtrace.googleapis.com\",\"protocolBinding\":\"GRPC\"},{\"url\":\"monitoring.googleapis.com\",\"protocolBinding\":\"GRPC\"},{\"url\":\"logging.googleapis.com\",\"protocolBinding\":\"GRPC\"}]"
+
+   gcloud alpha agent-registry services create check-gcp-subnet-ips-agw \
+     --location="${REGION}" --project="${PROJECT_ID}" \
+     --display-name="check-gcp-subnet-ips-agw" \
+     --agent-spec-type=no-spec \
+     --interfaces="[{\"url\":\"https://${REGION}-aiplatform.googleapis.com/v1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}:query\",\"protocolBinding\":\"HTTP_JSON\"},{\"url\":\"https://${REGION}-aiplatform.mtls.googleapis.com/v1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}:query\",\"protocolBinding\":\"HTTP_JSON\"},{\"url\":\"https://${REGION}-aiplatform.googleapis.com/v1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}:streamQuery\",\"protocolBinding\":\"HTTP_JSON\"},{\"url\":\"https://${REGION}-aiplatform.mtls.googleapis.com/v1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}:streamQuery\",\"protocolBinding\":\"HTTP_JSON\"}]"
+
+   # 4b. Auto-discover the new ${REGION} Agent Registry UUIDs and re-render cfg/uap-rules*.json
+   ./render_configs.sh --auto-discover
+   source cfg/env.sh
+
+   # 4c. Bind check-gcp-subnet-ips-agw to agw-study-ingress AND bind network-agent-agw to agw-study-egress
+   curl -s -X PATCH \
+     -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+     -H "Content-Type: application/json" \
+     "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" \
+     -d "{\"spec\":{\"deploymentSpec\":{\"agentGatewayConfig\":{\"clientToAgentConfig\":{\"agentGateway\":\"projects/${PROJECT_ID}/locations/${REGION}/agentGateways/${AGW_INGRESS_NAME}\"}}}}}"
+
+   python3 deploy_agent.py \
+     --project "${PROJECT_ID}" \
+     --region "${REGION}" \
+     --src-dir ./network_agent \
+     --display-name "network-agent-agw" \
+     --update-existing "${NETWORK_ENGINE_ID}" \
+     --enable-agent-identity \
+     --allow-token-sharing \
+     --enable-telemetry \
+     --agent-gateway-egress "projects/${PROJECT_ID}/locations/${REGION}/agentGateways/${AGW_EGRESS_NAME}" \
+     -e SUBNET_AGENT_TARGET=agent_platform \
+     -e CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID="projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}"
+   ```
+
 ---
 
 ## 1.6 Step-by-Step Self-Service Deletion Guide (Google Cloud Console UI + `gcloud` / `curl`)
