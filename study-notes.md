@@ -895,32 +895,30 @@ source cfg/env.sh
 > | **`network-agent-agw`** (`${NETWORK_ENGINE_ID}`) | **Caller / Orchestrator** (initiates outbound call to `check-gcp-subnet-ips-agw`) | `—` *(Not attached)* | **`agw-study-egress`** (`projects/.../agentGateways/agw-study-egress`) | Controls **outbound (egress)** calls from `network-agent-agw` using IAP v2 + Unified Access Policy (`uap-policy-agw-study-egress`). |
 > | **`check-gcp-subnet-ips-agw`** (`${SUBNET_ENGINE_ID}`) | **Receiver / Specialist** (receives inbound call & runs local Python subnet calculation) | **`agw-study-ingress`** (`projects/.../agentGateways/agw-study-ingress`) | `—` *(Not attached — expected!)* | Inspects **inbound (ingress)** prompts arriving at `check-gcp-subnet-ips-agw` using Model Armor. It does not call any downstream sub-agents, so its Egress field stays `—`. |
 
-Run this command in Cloud Shell to bind **`network-agent-agw` (`${NETWORK_ENGINE_ID}`)** to **`agw-study-egress`** (`agentToAnywhereConfig`):
+Run this command in Cloud Shell to bind **`network-agent-agw` (`${NETWORK_ENGINE_ID}`)** to **`agw-study-egress`** (`agentToAnywhereConfig`) in-place (preserving the same `NETWORK_ENGINE_ID`):
+
+> **Why does Egress Gateway (`agentToAnywhereConfig`) use `deploy_agent.py --update-existing` while Ingress Gateway (`clientToAgentConfig`) uses a 30-second `curl -X PATCH`?**
+> - **Ingress (`clientToAgentConfig`)** is configured on Vertex AI's **frontend router** outside the container, so a lightweight `PATCH` (`updateMask=spec.deployment_spec.agent_gateway_config`) completes in ~30 seconds without touching the container.
+> - **Egress (`agentToAnywhereConfig`)** injects the Egress Gateway's **TLS Inspection Root CA certificate (`agentGatewayCard.rootCertificates`) and outbound proxy settings inside the agent container**. Because Vertex AI does not persist `inlineSource` tarball bytes after a build, a bare `PATCH` without source code fails with `code: 13`. Running `deploy_agent.py --update-existing "${NETWORK_ENGINE_ID}"` re-uploads the source tarball while keeping the **exact same `NETWORK_ENGINE_ID`** (`989023353568231424`)!
 
 ```bash
 cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 
-# Bind existing network-agent-agw (NETWORK_ENGINE_ID) to agw-study-egress (agentToAnywhereConfig) in-place:
-curl -s -X PATCH \
-  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  -H "Content-Type: application/json" \
-  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" \
-  -d "{
-    \"spec\": {
-      \"deploymentSpec\": {
-        \"agentGatewayConfig\": {
-          \"agentToAnywhereConfig\": {
-            \"agentGateway\": \"projects/${PROJECT_ID}/locations/${REGION}/agentGateways/${AGW_EGRESS_NAME}\"
-          }
-        }
-      }
-    }
-  }"
-
-# Note: First-time Egress Gateway binding provisions the regional Secure Web Proxy route in Vertex AI (~60-90 seconds).
-sleep 45
+# Update existing network-agent-agw (NETWORK_ENGINE_ID) in-place with Egress Agent Gateway bound:
+python3 deploy_agent.py \
+  --project "${PROJECT_ID}" \
+  --region "${REGION}" \
+  --src-dir ./network_agent \
+  --display-name "network-agent-agw" \
+  --update-existing "${NETWORK_ENGINE_ID}" \
+  --enable-agent-identity \
+  --allow-token-sharing \
+  --enable-telemetry \
+  --agent-gateway-egress "projects/${PROJECT_ID}/locations/${REGION}/agentGateways/${AGW_EGRESS_NAME}" \
+  -e SUBNET_AGENT_TARGET=agent_platform \
+  -e CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID="projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}"
 ```
-After running this command, open **Agent Platform $\rightarrow$ Deployments $\rightarrow$ `network-agent-agw` $\rightarrow$ Update service configuration $\rightarrow$ Deployment details** in the Console UI and verify that **`Agent to Anywhere (Egress)`** now shows `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress`!
+After this command completes, open **Agent Platform $\rightarrow$ Deployments $\rightarrow$ `network-agent-agw` $\rightarrow$ Update service configuration $\rightarrow$ Deployment details** in the Console UI and verify that **`Agent to Anywhere (Egress)`** now shows `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress`!
 
 ---
 
