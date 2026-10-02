@@ -580,8 +580,14 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
 ### Phase 1: Baseline Deployment & Testing **BEFORE** Agent Gateway (Unprotected Agents)
 
 #### Step 1: Deploy the 3 Agent Runtimes *WITHOUT* Any Agent Gateway Bound
-Notice that in **Step 1a** below, we omit `--agent-gateway-ingress` so `check-gcp-subnet-ips-agw` starts with **zero gateway protection**:
+Notice that in **Step 1a** below, we omit `--agent-gateway-ingress` so `check-gcp-subnet-ips-agw` starts with **zero gateway protection**.
 
+> [!TIP]
+> **Self-Healing `SUBNET_ENGINE_ID` Protection (No More Stale IDs Across Tabs or Re-Creates!):**
+> - Below, **Step 1a–1b**, **Step 1c–1d**, and **Step 1e** are separated into 3 distinct copy-paste blocks. Each block begins with `./render_configs.sh --auto-discover && source cfg/env.sh` so that even if you run commands across multiple Cloud Shell tabs, copy-paste a whole block at once, or run `git pull` mid-lab, your shell always loads the live `SUBNET_ENGINE_ID` from Vertex AI in `${REGION}`.
+> - In addition, [`deploy_agent.py`](file:///usr/local/google/home/indrapn/my_agy/agent-gateway-study-01/deploy_agent.py) (`resolve_live_subnet_engine_id()`) now **queries Vertex AI directly before every `network-agent-agw` deployment** (both Agent Platform and Cloud Run). If `${SUBNET_ENGINE_ID}` in your shell or `cfg/env.sh` ever points to a deleted or stale Reasoning Engine ID, `deploy_agent.py` automatically overrides it with the live `check-gcp-subnet-ips-agw` ID in `${REGION}` and updates `cfg/env.sh` for you!
+
+**Step 1a & 1b — Deploy Specialist Agent (`check-gcp-subnet-ips-agw`) & Auto-Discover its ID:**
 ```bash
 cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 
@@ -596,8 +602,13 @@ python3 deploy_agent.py \
   --enable-telemetry
 
 # 1b. Auto-discover the new SUBNET_ENGINE_ID and update cfg/env.sh in-place
-./render_configs.sh --auto-discover
-source cfg/env.sh
+./render_configs.sh --auto-discover && source cfg/env.sh
+```
+
+**Step 1c & 1d — Deploy Orchestrator Agent on Agent Platform (`network-agent-agw`, Mode 2):**
+```bash
+cd "$HOME/agent-gateway-study-01"
+./render_configs.sh --auto-discover && source cfg/env.sh
 
 # 1c. Deploy Orchestrator Agent network-agent-agw on Agent Platform (Mode 2) pointing to SUBNET_ENGINE_ID
 python3 deploy_agent.py \
@@ -612,8 +623,13 @@ python3 deploy_agent.py \
   -e CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID="projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}"
 
 # 1d. Auto-discover the new NETWORK_ENGINE_ID and update cfg/env.sh in-place
-./render_configs.sh --auto-discover
-source cfg/env.sh
+./render_configs.sh --auto-discover && source cfg/env.sh
+```
+
+**Step 1e — Deploy Orchestrator Agent on Cloud Run (`network-agent-agw`, Mode 3 Web UI):**
+```bash
+cd "$HOME/agent-gateway-study-01"
+./render_configs.sh --auto-discover && source cfg/env.sh
 
 # 1e. Deploy Cloud Run network-agent-agw (Mode 3 Web UI in asia-southeast2) from scratch
 python3 deploy_agent.py \

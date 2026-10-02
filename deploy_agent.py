@@ -131,6 +131,63 @@ def patch_agent_gateway_config(
         time.sleep(10)
 
 
+def resolve_live_subnet_engine_id(
+    project: str,
+    env_vars: dict[str, str],
+    original_cwd: str,
+) -> None:
+    """Ensure CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID always points to the newest live check-gcp-subnet-ips-agw in target_region."""
+    raw_val = env_vars.get("CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID", "")
+    if not raw_val:
+        return
+    parts = raw_val.split("/")
+    if len(parts) < 6 or parts[2] != "locations" or parts[4] != "reasoningEngines":
+        return
+    proj_num_or_id = parts[1]
+    target_region = parts[3]
+    passed_id = parts[5]
+
+    try:
+        url = f"https://{target_region}-aiplatform.googleapis.com/v1beta1/projects/{project}/locations/{target_region}/reasoningEngines"
+        resp = requests.get(url, headers=get_auth_headers(), timeout=30)
+        if resp.status_code != 200:
+            return
+        engines = [
+            e
+            for e in resp.json().get("reasoningEngines", [])
+            if e.get("displayName") == "check-gcp-subnet-ips-agw"
+        ]
+        if not engines:
+            return
+        engines.sort(key=lambda e: e.get("createTime", ""), reverse=True)
+        newest_full_name = engines[0]["name"]  # projects/<num>/locations/<region>/reasoningEngines/<id>
+        newest_id = newest_full_name.split("/")[-1]
+        all_ids_in_region = {e["name"].split("/")[-1] for e in engines}
+
+        if passed_id not in all_ids_in_region or passed_id != newest_id:
+            new_val = f"projects/{proj_num_or_id}/locations/{target_region}/reasoningEngines/{newest_id}"
+            print(
+                f"[Auto-Resolved SUBNET_ENGINE_ID]: Replaced '{passed_id}' with live "
+                f"'check-gcp-subnet-ips-agw' in {target_region}: {new_val}"
+            )
+            env_vars["CHECK_GCP_SUBNET_IPS_AGENT_ENGINE_ID"] = new_val
+            env_sh_path = os.path.join(original_cwd, "cfg", "env.sh")
+            if os.path.exists(env_sh_path):
+                import re
+                with open(env_sh_path, "r", encoding="utf-8") as ef:
+                    content = ef.read()
+                content = re.sub(
+                    r"^export SUBNET_ENGINE_ID=.*$",
+                    f'export SUBNET_ENGINE_ID="{newest_id}"',
+                    content,
+                    flags=re.MULTILINE,
+                )
+                with open(env_sh_path, "w", encoding="utf-8") as ef:
+                    ef.write(content)
+    except Exception as exc:
+        print(f"Warning: Could not auto-verify SUBNET_ENGINE_ID in {target_region}: {exc}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Deploy ADK Agent to Vertex AI Agent Engine or Cloud Run with Agent Identity and Agent Gateway"
@@ -251,6 +308,8 @@ def main():
                         k, v = item.split("=", 1)
                         env_vars[k.strip()] = v.strip()
 
+            resolve_live_subnet_engine_id(args.project, env_vars, original_cwd)
+
             extra_env_lines = "\n".join(f'ENV {k}="{v}"' for k, v in env_vars.items())
             dockerfile_path = os.path.join(staging_dir, "Dockerfile")
             with open(dockerfile_path, "w", encoding="utf-8") as f:
@@ -340,6 +399,8 @@ def main():
                 if "=" in item:
                     k, v = item.split("=", 1)
                     env_vars[k.strip()] = v.strip()
+
+        resolve_live_subnet_engine_id(args.project, env_vars, original_cwd)
 
         extra_env_lines = "\n".join(f'ENV {k}="{v}"' for k, v in env_vars.items())
 
