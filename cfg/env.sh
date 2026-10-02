@@ -62,7 +62,7 @@ export CLOUD_RUN_REGION="asia-southeast2"
 #     to Vertex AI Agent Engine (`deploy_agent.py --src-dir ./check_gcp_subnet_ips ...`).
 #   - Example: "1020302260355203072"
 #   - How to find automatically: ./render_configs.sh --auto-discover
-export SUBNET_ENGINE_ID="1020302260355203072"
+export SUBNET_ENGINE_ID="2324340643083583488"
 
 # [AUTO-UPDATED BY `./render_configs.sh --auto-discover` AFTER DEPLOYING `network_agent`]:
 #   - The random numeric ReasoningEngine ID assigned when you deploy `network-agent-agw`
@@ -71,7 +71,7 @@ export SUBNET_ENGINE_ID="1020302260355203072"
 #     `principal://agents.global.org-${ORG_ID}.system.id.goog/resources/aiplatform/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}`
 #   - Example: "1179054147220013056"
 #   - How to find automatically: ./render_configs.sh --auto-discover
-export NETWORK_ENGINE_ID="1179054147220013056"
+export NETWORK_ENGINE_ID="989023353568231424"
 
 # ------------------------------------------------------------------------------
 # 4. AGENT REGISTRY AUTO-GENERATED UUIDs (HIDDEN STATIC VALUES IN UAP CEL RULES!)
@@ -89,7 +89,7 @@ export NETWORK_ENGINE_ID="1179054147220013056"
 #       gcloud alpha agent-registry services describe core-gapi-services \
 #         --location="${REGION}" --project="${PROJECT_ID}" \
 #         --format="value(registryResource)" | awk -F'/' '{print $NF}'
-export CORE_GAPI_ENDPOINT_ID="agentregistry-00000000-0000-0000-444f-0dd5654527c5"
+export CORE_GAPI_ENDPOINT_ID="agentregistry-00000000-0000-0000-37b8-dfca17d759b1"
 
 # [AUTO-UPDATED BY `./render_configs.sh --auto-discover` AFTER DEPLOYING `check-gcp-subnet-ips-agw`]:
 #   - The auto-discovered Agent ID created in Agent Registry when `check-gcp-subnet-ips-agw`
@@ -100,7 +100,7 @@ export CORE_GAPI_ENDPOINT_ID="agentregistry-00000000-0000-0000-444f-0dd5654527c5
 #         --location="${REGION}" --project="${PROJECT_ID}" \
 #         --filter="displayName=check-gcp-subnet-ips-agw" \
 #         --format="value(name)" | head -n 1 | awk -F'/' '{print $NF}'
-export SUBNET_AGENT_AUTO_REG_ID="agentregistry-00000000-0000-0000-f25b-29d92d70d0d5"
+export SUBNET_AGENT_AUTO_REG_ID="agentregistry-00000000-0000-0000-dc2e-aee2c1654511"
 
 # [AUTO-UPDATED BY `./render_configs.sh --auto-discover` AFTER REGISTERING CUSTOM SERVICE `check-gcp-subnet-ips-agw`]:
 #   - The internal Agent ID generated when registering the custom `.mtls.` service
@@ -110,7 +110,7 @@ export SUBNET_AGENT_AUTO_REG_ID="agentregistry-00000000-0000-0000-f25b-29d92d70d
 #       gcloud alpha agent-registry services describe check-gcp-subnet-ips-agw \
 #         --location="${REGION}" --project="${PROJECT_ID}" \
 #         --format="value(registryResource)" | awk -F'/' '{print $NF}'
-export SUBNET_AGENT_CUSTOM_REG_ID="agentregistry-00000000-0000-0000-f25b-29d92d70d0d5"
+export SUBNET_AGENT_CUSTOM_REG_ID="agentregistry-00000000-0000-0000-dc2e-aee2c1654511"
 
 # ------------------------------------------------------------------------------
 # 5. RESOURCE NAMING VARIABLES (OPTIONAL — CAN KEEP DEFAULTS ACROSS PROJECTS)

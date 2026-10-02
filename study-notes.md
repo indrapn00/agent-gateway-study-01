@@ -821,6 +821,15 @@ When you create the Egress Gateway with IAP Access Authorization enabled, you ar
   5. **Registries:** Select your `us-central1` and `global` Agent Registries.
   6. **Access authorization:** Select **Enforce** (or **Audit only**) and **Unified Access Policy (recommended)**.
   7. Click **Create**. *(The UI automatically creates `agw-study-egress`, `agw-study-egress-iap-authzextension`, and `agw-study-egress-iap-authzpolicy`.)*
+  8. **Important 1-Time Cloud Shell Update after UI Creation:** Just like the Ingress UI wizard, the Console UI wizard creates `agw-study-egress-iap-authzextension` with **`failOpen: true`** by default! Run this command in Cloud Shell to set **`failOpen: false`** (so unauthorized outbound traffic is strictly blocked):
+     ```bash
+     cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
+
+     gcloud beta service-extensions authz-extensions import "${AGW_EGRESS_EXT_NAME}" \
+       --source=cfg/agw-study-egress-svc-ext-iap.yaml \
+       --location="${REGION}" \
+       --project="${PROJECT_ID}"
+     ```
 - **Using `gcloud` CLI Only (Fallback if you didn't use the UI in 3a):**
   ```bash
   cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
@@ -876,6 +885,43 @@ gcloud alpha agent-registry services create check-gcp-subnet-ips-agw \
 source cfg/env.sh
 ```
 
+##### 3c. Bind `network-agent-agw` (Orchestrator) to `agw-study-egress` (`Agent to Anywhere`)
+
+> **⚠️ Crucial Architecture Check: Which Agent Gets Which Gateway?**
+> When you inspect your two agents in the Console UI (**Agent Platform $\rightarrow$ Deployments (Agent Engine) $\rightarrow$ `<agent>` $\rightarrow$ Update service configuration $\rightarrow$ Deployment details**), remember that each agent has a different role in the call chain:
+>
+> | Agent Name | Role in Call Chain | `Client to Agent (Ingress)` | `Agent to Anywhere (Egress)` | Why? |
+> | :--- | :--- | :--- | :--- | :--- |
+> | **`network-agent-agw`** (`${NETWORK_ENGINE_ID}`) | **Caller / Orchestrator** (initiates outbound call to `check-gcp-subnet-ips-agw`) | `—` *(Not attached)* | **`agw-study-egress`** (`projects/.../agentGateways/agw-study-egress`) | Controls **outbound (egress)** calls from `network-agent-agw` using IAP v2 + Unified Access Policy (`uap-policy-agw-study-egress`). |
+> | **`check-gcp-subnet-ips-agw`** (`${SUBNET_ENGINE_ID}`) | **Receiver / Specialist** (receives inbound call & runs local Python subnet calculation) | **`agw-study-ingress`** (`projects/.../agentGateways/agw-study-ingress`) | `—` *(Not attached — expected!)* | Inspects **inbound (ingress)** prompts arriving at `check-gcp-subnet-ips-agw` using Model Armor. It does not call any downstream sub-agents, so its Egress field stays `—`. |
+
+Run this command in Cloud Shell to bind **`network-agent-agw` (`${NETWORK_ENGINE_ID}`)** to **`agw-study-egress`** (`agentToAnywhereConfig`):
+
+```bash
+cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
+
+# Bind existing network-agent-agw (NETWORK_ENGINE_ID) to agw-study-egress (agentToAnywhereConfig) in-place:
+curl -s -X PATCH \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" \
+  -d "{
+    \"spec\": {
+      \"deploymentSpec\": {
+        \"agentGatewayConfig\": {
+          \"agentToAnywhereConfig\": {
+            \"agentGateway\": \"projects/${PROJECT_ID}/locations/${REGION}/agentGateways/${AGW_EGRESS_NAME}\"
+          }
+        }
+      }
+    }
+  }"
+
+# Note: First-time Egress Gateway binding provisions the regional Secure Web Proxy route in Vertex AI (~60-90 seconds).
+sleep 45
+```
+After running this command, open **Agent Platform $\rightarrow$ Deployments $\rightarrow$ `network-agent-agw` $\rightarrow$ Update service configuration $\rightarrow$ Deployment details** in the Console UI and verify that **`Agent to Anywhere (Egress)`** now shows `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress`!
+
 ---
 
 #### Step 4: Configure & Compare Unified Access Policy (UAP) — **"Before Rule 2 (`cfg/uap-rules.json`)" vs. "After Rule 2 (`cfg/uap-rules-allow-subnet.json`)"**
@@ -888,12 +934,12 @@ source cfg/env.sh
    - Direct link: [`https://console.cloud.google.com/agent-platform/policies/iam?project=gcp-demo-02-307713`](https://console.cloud.google.com/agent-platform/policies/iam?project=gcp-demo-02-307713)
 
 ##### 4b. State 1 ("BEFORE Rule 2" — Default Deny for Agent-to-Agent Calls using [`cfg/uap-rules.json`](./cfg/uap-rules.json))
-First, apply **`cfg/uap-rules.json`**, which contains **ONLY Rule 1** (allowing agents in the project to reach `core-gapi-services` so Gemini works, while **omitting Rule 2** so no agent is authorized to call `check-gcp-subnet-ips-agw`):
+First, apply **`cfg/uap-rules.json`**, which contains **ONLY Rule 1** (allowing agents in the project to reach `core-gapi-services` so Gemini works, while **omitting Rule 2** so no agent is authorized to call `check-gcp-subnet-ips-agw`), and then **test calling `network-agent-agw`**:
 
 ```bash
 cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 
-# Apply cfg/uap-rules.json (Rule 1 ONLY -> Default Deny for calling check-gcp-subnet-ips-agw!)
+# 1. Apply cfg/uap-rules.json (Rule 1 ONLY -> Default Deny for calling check-gcp-subnet-ips-agw!)
 ETAG=$(gcloud iam access-policies describe "projects/${PROJECT_ID}/locations/global/accessPolicies/${UAP_POLICY_NAME}" \
   --format="value(etag)" 2>/dev/null || true)
 
@@ -917,29 +963,61 @@ else
       }
     }"
 fi
+
+# 2. [TEST STATE 1 - BEFORE RULE 2 (Default Deny)]
+# 🛑 OBSERVE: Even for a benign query, when network-agent-agw tries to call check-gcp-subnet-ips-agw
+# through agw-study-egress, IAP v2 BLOCKS the outbound sub-agent call with HTTP 403 Forbidden!
+curl -s -X POST \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}:streamQuery" \
+  -d '{
+    "class_method": "stream_query",
+    "input": {
+      "user_id": "indra-uap-before-rule2",
+      "message": "How many usable IPs are in 10.10.0.0/28 in GCP?"
+    }
+  }'
 ```
 - **What Happens in State 1 (`cfg/uap-rules.json`):**
   - Open the Console UI ([`https://console.cloud.google.com/iam-admin/iam/access-policies?project=gcp-demo-02-307713`](https://console.cloud.google.com/iam-admin/iam/access-policies?project=gcp-demo-02-307713)) and click **`uap-policy-agw-study-egress`**.
   - You will see **only 1 rule** (`Rule 1: Allow Agent Platform runtimes in project ... to reach Core Google APIs`).
-  - Under Egress Agent Gateway (`AGENT_TO_ANYWHERE`) with IAP v2 (`failOpen: false`), **Default Deny** applies to all outbound destinations. Because there is no rule permitting `network-agent-agw` to call `check-gcp-subnet-ips-agw`, any outbound call through the Egress Gateway to `check-gcp-subnet-ips-agw` is denied by IAP v2 with **`HTTP 403 Forbidden` (`iap.googleapis.com/resources.egressViaIAP`)**!
+  - Under Egress Agent Gateway (`AGENT_TO_ANYWHERE`) with IAP v2 (`failOpen: false`), **Default Deny** applies to all outbound destinations. Because there is no rule permitting `network-agent-agw` to call `check-gcp-subnet-ips-agw`, the outbound call from `network-agent-agw` to `check-gcp-subnet-ips-agw` is denied by IAP v2 with **`HTTP 403 Forbidden`** (so `network-agent-agw` returns an error from `delegate_subnet_calculation`)!
 
 ##### 4c. State 2 ("AFTER Rule 2" — Explicit SPIFFE Allow using [`cfg/uap-rules-allow-subnet.json`](./cfg/uap-rules-allow-subnet.json))
-Now update `uap-policy-agw-study-egress` with **`cfg/uap-rules-allow-subnet.json`**, which adds **Rule 2** authorizing **ONLY** `network-agent-agw`'s individual SPIFFE identity (`principal://agents.global.org-${ORG_ID}.system.id.goog/resources/aiplatform/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}`) to call `check-gcp-subnet-ips-agw`:
+Now update `uap-policy-agw-study-egress` with **`cfg/uap-rules-allow-subnet.json`**, which adds **Rule 2** authorizing **ONLY** `network-agent-agw`'s individual SPIFFE identity (`principal://agents.global.org-${ORG_ID}.system.id.goog/resources/aiplatform/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}`) to call `check-gcp-subnet-ips-agw`, and re-test:
 
 ```bash
 cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 
-# Apply cfg/uap-rules-allow-subnet.json (Rule 1 + Rule 2 -> Explicit Allow for network-agent-agw SPIFFE ID!)
+# 1. Apply cfg/uap-rules-allow-subnet.json (Rule 1 + Rule 2 -> Explicit Allow for network-agent-agw SPIFFE ID!)
 ETAG=$(gcloud iam access-policies describe "projects/${PROJECT_ID}/locations/global/accessPolicies/${UAP_POLICY_NAME}" \
   --format="value(etag)" 2>/dev/null || true)
 
 gcloud iam access-policies update "projects/${PROJECT_ID}/locations/global/accessPolicies/${UAP_POLICY_NAME}" \
   --details-rules=cfg/uap-rules-allow-subnet.json \
   --etag="${ETAG}"
+
+# Wait ~15 seconds for IAM v3 UAP propagation, then re-test:
+sleep 15
+
+# 2. [TEST STATE 2 - AFTER RULE 2 (Explicit SPIFFE Allow)]
+# ✅ OBSERVE: Now IAP v2 matches network-agent-agw's SPIFFE ID against Rule 2 and ALLOWS the call!
+curl -s -X POST \
+  -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_NUMBER}/locations/${REGION}/reasoningEngines/${NETWORK_ENGINE_ID}:streamQuery" \
+  -d '{
+    "class_method": "stream_query",
+    "input": {
+      "user_id": "indra-uap-after-rule2",
+      "message": "How many usable IPs are in 10.10.0.0/28 in GCP?"
+    }
+  }'
 ```
 - **What Changes in State 2 (`cfg/uap-rules-allow-subnet.json`):**
   - Refresh [`uap-policy-agw-study-egress` in the Console UI](https://console.cloud.google.com/iam-admin/iam/access-policies?project=gcp-demo-02-307713): you now see **Rule 2** explicitly matching `network-agent-agw`'s SPIFFE ID (`.../reasoningEngines/${NETWORK_ENGINE_ID}`) and destination Agent Registry entry `check-gcp-subnet-ips-agw`!
-  - Outbound calls from `network-agent-agw` to `check-gcp-subnet-ips-agw` are now authorized (`HTTP 200 OK`), while **any other agent** in the project (with a different `ReasoningEngine` ID) remains blocked by Zero-Trust Default Deny!
+  - Outbound calls from `network-agent-agw` to `check-gcp-subnet-ips-agw` are now authorized (`HTTP 200 OK`, returns `12 usable IPs`), while **any other agent** in the project (with a different `ReasoningEngine` ID) remains blocked by Zero-Trust Default Deny!
 
 ---
 
