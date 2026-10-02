@@ -40,6 +40,35 @@ agent-gateway-study-01/
 
 ---
 
+## 1.2 How to Read the `cfg/` Files (What Agent Gateway, `AuthzPolicy` & `AuthzExtension` Actually Do)
+
+At first glance, seeing **8 separate YAML/JSON files** inside [`cfg/`](./cfg/) can feel confusing. Why do we need 3 YAML files just to configure one Ingress Gateway, and 3 YAML files + 2 JSON files for one Egress Gateway?
+
+Because Google Cloud Agent Gateway uses a **modular 4-Building-Block architecture** (identical in concept to **Cloud Load Balancing / Secure Web Proxy + Envoy `ext_authz` Service Extensions + Cloud Armor**):
+
+```mermaid
+flowchart LR
+    GW["1️⃣ AgentGateway<br/>(The Data-Plane Proxy)<br/>agw-study-ingress.yaml<br/>agw-study-egress.yaml"]
+    POL["2️⃣ AuthzPolicy<br/>(The 'Glue' / Wiring Rule)<br/>*-authz-policy-*.yaml"]
+    EXT["3️⃣ AuthzExtension<br/>(The Security Callout)<br/>*-svc-ext-*.yaml"]
+    RULES["4️⃣ Rulebook / Template<br/>(Allow or Block Logic)<br/>Model Armor Template OR<br/>uap-rules*.json"]
+
+    GW <-->|"Target of Policy"| POL
+    POL -->|"Calls Extension"| EXT
+    EXT -->|"Evaluates"| RULES
+```
+
+| Building Block | GCP Resource Type | Simple Networking Explanation | Ingress Files (Scenario 2: Prompt Inspection) | Egress Files (Scenario 1: Zero-Trust Identity) |
+| :--- | :--- | :--- | :--- | :--- |
+| **1️⃣ `AgentGateway`** *(The Proxy)* | `network-services agent-gateways` | Creates the **Google-managed Envoy Proxy** in the data plane (`CLIENT_TO_AGENT` = Reverse Proxy in front of a target agent; `AGENT_TO_ANYWHERE` = Forward Proxy in front of a calling agent). **By itself, a bare Gateway is just a pipe—it does not inspect or block anything until you wire an `AuthzPolicy` to it!** | **[`cfg/agw-study-ingress.yaml`](./cfg/agw-study-ingress.yaml)**<br>• `governedAccessPath: CLIENT_TO_AGENT` (Inbound reverse proxy) | **[`cfg/agw-study-egress.yaml`](./cfg/agw-study-egress.yaml)**<br>• `governedAccessPath: AGENT_TO_ANYWHERE` (Outbound forward proxy)<br>• `registries:` links Agent Registry so the proxy can map destination URLs to registered agents/endpoints |
+| **2️⃣ `AuthzPolicy`** *(The Wiring / Glue)* | `network-security authz-policies` | The **"Wiring Rule"** that attaches to a `target` (`AgentGateway`) and tells the proxy **when** to pause traffic (`CONTENT_AUTHZ` vs. `REQUEST_AUTHZ`) and **which** `AuthzExtension` to call (`action: CUSTOM`). | **[`cfg/agw-study-ingress-authz-policy-modar.yaml`](./cfg/agw-study-ingress-authz-policy-modar.yaml)**<br>• `target`: `agw-study-ingress`<br>• `policyProfile: CONTENT_AUTHZ` (inspects HTTP body/prompts)<br>• `authzExtension`: `...-aisecurity-authzextension` | **[`cfg/agw-study-egress-authz-policy-iap.yaml`](./cfg/agw-study-egress-authz-policy-iap.yaml)**<br>• `target`: `agw-study-egress`<br>• `policyProfile: REQUEST_AUTHZ` (inspects caller identity & destination)<br>• `authzExtension`: `...-iap-authzextension` |
+| **3️⃣ `AuthzExtension`** *(Service Extension Callout)* | `service-extensions authz-extensions` | Configures the **External Security Brain (gRPC callout)** that the proxy talks to, what headers/metadata to pass, timeout, and **Fail-Closed** behavior (`failOpen: false`). | **[`cfg/agw-study-ingress-svc-ext-modar.yaml`](./cfg/agw-study-ingress-svc-ext-modar.yaml)**<br>• `service: modelarmor.us-central1.rep.googleapis.com`<br>• `forwardHeaders: [authorization]`<br>• `metadata.model_armor_settings`: points to `request_template_id` & `response_template_id`<br>• `failOpen: false` | **[`cfg/agw-study-egress-svc-ext-iap.yaml`](./cfg/agw-study-egress-svc-ext-iap.yaml)**<br>• `service: iap.googleapis.com`<br>• `failOpen: false` (`Enforce` mode)<br>• `metadata.iapPolicyVersion: "V2"` (enables Unified Access Policy CEL rules) |
+| **4️⃣ Rulebook / Template** *(Allow/Block Rules)* | `model-armor templates` **OR** `iam access-policies` | The actual **security rules** evaluated by Model Armor or IAP v2. | **Model Armor Template** (`agw-study-ingress-modar-req-template`)<br>• Blocks Prompt Injection, Jailbreak, and RAI violations (`HTTP 403 PERMISSION_DENIED`) | **[`cfg/uap-rules.json`](./cfg/uap-rules.json)** *(Rule 1 only: Default Deny for sub-agent)*<br>**[`cfg/uap-rules-allow-subnet.json`](./cfg/uap-rules-allow-subnet.json)** *(Rule 1 + Rule 2: allows ONLY `network-agent-agw` SPIFFE ID to call `check-gcp-subnet-ips-agw`)* |
+
+> **💡 Tip:** When you use the **Google Cloud Console UI** to create an Agent Gateway and toggle **AI Security** or **Access authorization** ON, the UI automatically creates **Building Blocks 1️⃣, 2️⃣, and 3️⃣** (`AgentGateway` + `AuthzPolicy` + `AuthzExtension`) behind the scenes in one click! For a complete line-by-line syntax breakdown of every single file in `cfg/`, see **[`cfg/README.md`](./cfg/README.md)** and **[`study-notes.md` Section 6.2](./study-notes.md)**.
+
+---
+
 ## 1.5 Re-Deploying to a Different GCP Project or With New ReasoningEngine IDs
 
 When you move to a **different GCP Project**, **different Organization**, **different Region**, or re-create your agents on Agent Platform (which assigns new random **`ReasoningEngine` IDs** and new random **`agentregistry-...` UUIDs**):

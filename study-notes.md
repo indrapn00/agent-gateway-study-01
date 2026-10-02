@@ -239,6 +239,200 @@ sequenceDiagram
 
 ---
 
+## 6.2 Deep-Dive Guide to Reading the `cfg/` Files (What Agent Gateway, `AuthzPolicy` & `AuthzExtension` Actually Do + Line-by-Line Syntax)
+
+When you look inside the [`cfg/`](./cfg/) folder, there are **8 YAML/JSON files** across **4 different Google Cloud APIs**. If you try to read them without a mental map, it is hard to see why so many files are needed or how they connect.
+
+From a Google Cloud Networking perspective, **every Agent Gateway is built from 4 modular building blocks** (the exact same pattern used by **Cloud Load Balancing / Secure Web Proxy + Envoy `ext_authz` Service Extensions + Cloud Armor**):
+
+```mermaid
+flowchart LR
+    GW["1️⃣ AgentGateway<br/>(The Data-Plane Proxy)<br/>agw-study-ingress.yaml<br/>agw-study-egress.yaml"]
+    POL["2️⃣ AuthzPolicy<br/>(The 'Glue' / Wiring Rule)<br/>*-authz-policy-*.yaml"]
+    EXT["3️⃣ AuthzExtension<br/>(The Security Callout)<br/>*-svc-ext-*.yaml"]
+    RULES["4️⃣ Rulebook / Template<br/>(Allow or Block Logic)<br/>Model Armor Template OR<br/>uap-rules*.json"]
+
+    GW <-->|"Target of Policy"| POL
+    POL -->|"Calls Extension"| EXT
+    EXT -->|"Evaluates"| RULES
+```
+
+### The 4 Building Blocks Explained Simply
+
+1. **Building Block 1️⃣ — `AgentGateway` (`agw-study-ingress.yaml` & `agw-study-egress.yaml`):**
+   - **What it is:** The **Google-Managed Envoy Proxy** in the data plane (`network-services agent-gateways`).
+   - **What it does:** Intercepts traffic either **Inbound (`CLIENT_TO_AGENT`)** as a Reverse Proxy in front of a target agent, or **Outbound (`AGENT_TO_ANYWHERE`)** as a Forward Proxy (Secure Web Proxy) in front of a calling agent.
+   - **Key Insight:** **A bare `AgentGateway` by itself is just a proxy pipe!** It does *not* inspect prompts or block unauthorized callers until you wire an `AuthzPolicy` to it.
+2. **Building Block 2️⃣ — `AuthzPolicy` (`*-authz-policy-*.yaml`):**
+   - **What it is:** The **"Wiring Cable" (Glue)** (`network-security authz-policies`) that connects an `AgentGateway` (`target`) to a Service Extension (`customProvider.authzExtension`).
+   - **What it does:** Tells the Gateway proxy **at which stage** to pause traffic and call the extension:
+     - `policyProfile: CONTENT_AUTHZ` $\rightarrow$ Buffer and send the **HTTP Request/Response Body** (the LLM prompt and response text) to the extension.
+     - `policyProfile: REQUEST_AUTHZ` $\rightarrow$ Send the **Request Headers & Caller SPIFFE Identity** to the extension before allowing the outbound connection.
+3. **Building Block 3️⃣ — `AuthzExtension` / Service Extension (`*-svc-ext-*.yaml`):**
+   - **What it is:** The **External Security Callout (`ext_authz`)** (`service-extensions authz-extensions`).
+   - **What it does:** Tells the Gateway proxy **which Google security backend** to call over gRPC (`service: modelarmor.<REGION>.rep.googleapis.com` for Ingress; `service: iap.googleapis.com` for Egress), what headers/metadata to forward, how long to wait (`timeout`), and whether to **Fail Closed** (`failOpen: false` = block traffic if the check fails or errors).
+4. **Building Block 4️⃣ — The Rulebook (`Model Armor Template` or `uap-rules*.json`):**
+   - **What it is:** The actual **Allow / Block rules** evaluated by Model Armor or IAP v2:
+     - For **Ingress:** The Model Armor Template (`agw-study-ingress-modar-req-template`) defines which content filters (Prompt Injection, Jailbreak, RAI) trigger an `HTTP 403 PERMISSION_DENIED` block.
+     - For **Egress:** [`cfg/uap-rules.json`](./cfg/uap-rules.json) and [`cfg/uap-rules-allow-subnet.json`](./cfg/uap-rules-allow-subnet.json) define **who** (`principals`: which agent SPIFFE ID) is allowed (`effect: ALLOW`) to egress (`iap.googleapis.com/resources.egressViaIAP`) to **which destination** (`conditions`: which Agent Registry `ENDPOINT` or `AGENT`).
+
+> **Why did the Google Cloud Console UI feel like a single step?**
+> When you click **Create Gateway** in the Console UI and toggle **AI Security** or **Access authorization** ON, the UI automatically creates **Building Blocks 1️⃣, 2️⃣, and 3️⃣** (`AgentGateway` + `AuthzPolicy` + `AuthzExtension`) behind the scenes! Understanding the YAML files in `cfg/` lets you see how they work under the hood and customize settings the UI hides (such as `failOpen: false` and `forwardHeaders: ["authorization"]`).
+
+---
+
+### Line-by-Line Syntax Walkthrough of All 8 Files in `cfg/`
+
+#### Part A: The Ingress Agent Gateway Stack (3 YAML Files — North-South Prompt Inspection)
+
+##### 1. [`cfg/agw-study-ingress.yaml`](./cfg/agw-study-ingress.yaml) — *The Inbound Reverse Proxy*
+```yaml
+name: agw-study-ingress                 # [Line 11] Resource ID of the Ingress AgentGateway
+protocols:
+- MCP                                   # [Line 13] Agent protocol family handled by the proxy
+googleManaged:
+  governedAccessPath: CLIENT_TO_AGENT   # [Line 15] Direction: Inbound (Caller -> Target Agent)
+```
+- **`governedAccessPath: CLIENT_TO_AGENT`:** Provisions a **Reverse Proxy** in front of your destination Agent Platform agent (`check-gcp-subnet-ips-agw`). Any caller (whether a user, Cloud Run `network-agent-agw`, or another Agent Platform agent) calling `:streamQuery` on `check-gcp-subnet-ips-agw` must pass through this Ingress Gateway first.
+
+##### 2. [`cfg/agw-study-ingress-svc-ext-modar.yaml`](./cfg/agw-study-ingress-svc-ext-modar.yaml) — *The Model Armor Service Extension Callout*
+```yaml
+name: agw-study-ingress-aisecurity-authzextension   # [Line 16] Extension ID (matches UI naming: <gw>-aisecurity-authzextension)
+service: modelarmor.us-central1.rep.googleapis.com  # [Line 17] Regional Model Armor gRPC callout hostname (REP)
+forwardHeaders:
+- authorization                                     # [Line 19] CRITICAL: Forwards caller's OAuth Bearer token to Model Armor!
+metadata:
+  model_armor_settings: '[                          # [Line 21] JSON array mapping Request & Response to Model Armor templates
+    {
+      "request_template_id": "projects/gcp-demo-02-307713/locations/us-central1/templates/agw-study-ingress-modar-req-template",
+      "response_template_id": "projects/gcp-demo-02-307713/locations/us-central1/templates/agw-study-ingress-modar-req-template"
+    }
+  ]'
+failOpen: false                                     # [Line 27] Fail Closed: if Model Armor blocks or errors, DENY the request!
+timeout: 5s                                         # [Line 28] Max wait time (5 seconds) for Model Armor inspection
+```
+- **`service: modelarmor.us-central1.rep.googleapis.com`:** Tells the proxy's Envoy `ext_authz` filter to send payload callouts to Model Armor's **Regional Endpoint (REP)** in `us-central1`.
+- **`forwardHeaders: ["authorization"]`:** Instructs the proxy to forward the HTTP `Authorization: Bearer ...` header to Model Armor. *(The Console UI wizard omits this line by default, which causes Model Armor to reject the callout until you re-import this file!)*
+- **`metadata.model_armor_settings`:** Configures **bi-directional inspection**:
+  - `request_template_id`: Inspects the **incoming prompt** *before* it reaches `check-gcp-subnet-ips-agw`.
+  - `response_template_id`: Inspects the **outgoing LLM response** *before* it is returned to the caller.
+- **`failOpen: false`:** Enforces **Fail Closed** security (the Console UI wizard defaults to `failOpen: true`).
+
+##### 3. [`cfg/agw-study-ingress-authz-policy-modar.yaml`](./cfg/agw-study-ingress-authz-policy-modar.yaml) — *The Wiring Policy Connecting Ingress Gateway $\rightarrow$ Model Armor Extension*
+```yaml
+name: agw-study-ingress-aisecurity-authzpolicy      # [Line 13] Policy ID (matches UI naming: <gw>-aisecurity-authzpolicy)
+target:
+  resources:
+  - "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress"  # [Line 16] Attach to Ingress Gateway
+policyProfile: CONTENT_AUTHZ                        # [Line 17] Hook into HTTP Body/Payload stage (Prompts & Responses)
+action: CUSTOM                                      # [Line 18] Delegate allow/deny decision to an AuthzExtension
+customProvider:
+  authzExtension:
+    resources:
+    - "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-aisecurity-authzextension" # [Line 22] Call Model Armor Extension
+```
+- **`target.resources`:** Attaches this policy to `agw-study-ingress` (**File 1**).
+- **`policyProfile: CONTENT_AUTHZ`:** Tells the proxy to buffer and send the **L7 content payload** (prompt and completion text) to `customProvider.authzExtension` (**File 2**).
+
+---
+
+#### Part B: The Egress Agent Gateway Stack (3 YAML Files + 2 JSON UAP Files — East-West Zero-Trust Identity)
+
+##### 4. [`cfg/agw-study-egress.yaml`](./cfg/agw-study-egress.yaml) — *The Outbound Forward Proxy*
+```yaml
+name: agw-study-egress                  # [Line 13] Resource ID of the Egress AgentGateway
+protocols:
+- MCP                                   # [Line 15] Agent protocol family
+googleManaged:
+  governedAccessPath: AGENT_TO_ANYWHERE # [Line 17] Direction: Outbound (Calling Agent -> Any Destination)
+registries:                             # [Lines 18-20] Agent Registries used to resolve destination URLs
+- "//agentregistry.googleapis.com/projects/gcp-demo-02-307713/locations/us-central1"
+- "//agentregistry.googleapis.com/projects/gcp-demo-02-307713/locations/global"
+```
+- **`governedAccessPath: AGENT_TO_ANYWHERE`:** Provisions a **Forward Proxy** (Secure Web Proxy under the hood) that intercepts **100% of outbound traffic** leaving an agent bound to it (`network-agent-agw`).
+- **`registries`:** Links the Egress Gateway to your `us-central1` and `global` **Agent Registries**. When `network-agent-agw` makes an outbound HTTPS request to a URL (such as `https://us-central1-aiplatform.googleapis.com/.../reasoningEngines/1020302260355203072:streamQuery`), the Egress Gateway looks up that URL in `registries` to identify which **Agent Registry resource** (`destination.agent_registry.agent.name` or `endpoint.name`) is being called!
+
+##### 5. [`cfg/agw-study-egress-svc-ext-iap.yaml`](./cfg/agw-study-egress-svc-ext-iap.yaml) — *The IAP v2 Service Extension Callout*
+```yaml
+name: agw-study-egress-iap-authzextension  # [Line 10] Extension ID (matches UI naming: <gw>-iap-authzextension)
+service: iap.googleapis.com                # [Line 11] Global Identity-Aware Proxy (IAP) gRPC callout service
+failOpen: false                            # [Line 12] Fail Closed ("Enforce" mode in UI; failOpen: true = "Audit only")
+timeout: 1s                                # [Line 13] Max wait time (1 second) for IAP authorization check
+metadata:
+  iapPolicyVersion: "V2"                   # [Line 15] Selects Unified Access Policy (UAP = "V2") instead of IAM Allow ("V1")
+```
+- **`service: iap.googleapis.com`:** Sends authorization callouts to **Google Cloud Identity-Aware Proxy (IAP)**.
+- **`failOpen: false`:** Enforces **Zero-Trust Default Deny** (`Enforce` mode in the UI). If you select `Audit only` in the UI, it sets `failOpen: true`.
+- **`metadata.iapPolicyVersion: "V2"`:** Instructs IAP to evaluate **Unified Access Policies (`accessPolicies`)**—which support per-destination CEL conditions on Agent Registry entries—instead of legacy project-wide IAM Allow (`"V1"`).
+
+##### 6. [`cfg/agw-study-egress-authz-policy-iap.yaml`](./cfg/agw-study-egress-authz-policy-iap.yaml) — *The Wiring Policy Connecting Egress Gateway $\rightarrow$ IAP Extension*
+```yaml
+name: agw-study-egress-iap-authzpolicy     # [Line 13] Policy ID (matches UI naming: <gw>-iap-authzpolicy)
+target:
+  resources:
+  - "projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress" # [Line 16] Attach to Egress Gateway
+policyProfile: REQUEST_AUTHZ               # [Line 17] Hook into Request Header / Identity Authorization stage
+action: CUSTOM                             # [Line 18] Delegate allow/deny decision to an AuthzExtension
+customProvider:
+  authzExtension:
+    resources:
+    - "projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-iap-authzextension" # [Line 22] Call IAP Extension
+```
+- **`policyProfile: REQUEST_AUTHZ`:** Unlike `CONTENT_AUTHZ` (which inspects the prompt body), `REQUEST_AUTHZ` runs at the **request/connection header stage** to ask IAP: *"Is this calling agent's SPIFFE identity (`principal`) allowed to connect to this destination Agent Registry resource?"*
+
+##### 7 & 8. [`cfg/uap-rules.json`](./cfg/uap-rules.json) (Before Rule 2) & [`cfg/uap-rules-allow-subnet.json`](./cfg/uap-rules-allow-subnet.json) (After Rule 2) — *The Zero-Trust Firewall Rules Evaluated by IAP v2*
+```json
+[
+  {
+    "description": "Rule 1: Allow Agent Platform runtimes in project 66063681189 to reach Core Google APIs (agentregistry-00000000-0000-0000-444f-0dd5654527c5)",
+    "effect": "ALLOW",
+    "principals": [
+      "principalSet://agents.global.org-304553879287.system.id.goog/attribute.platformContainer/aiplatform/projects/66063681189"
+    ],
+    "operation": {
+      "permissions": [
+        "iap.googleapis.com/resources.egressViaIAP"
+      ]
+    },
+    "conditions": {
+      "iap.googleapis.com": {
+        "expression": "destination.is_registered == true && destination.agent_registry.resource_type == 'ENDPOINT' && (destination.agent_registry.endpoint.name == 'projects/gcp-demo-02-307713/locations/us-central1/endpoints/core-gapi-services' || destination.agent_registry.endpoint.name == 'projects/gcp-demo-02-307713/locations/us-central1/endpoints/agentregistry-00000000-0000-0000-444f-0dd5654527c5' || destination.agent_registry.endpoint.name == 'projects/66063681189/locations/us-central1/endpoints/agentregistry-00000000-0000-0000-444f-0dd5654527c5')"
+      }
+    }
+  },
+  {
+    "description": "Rule 2: Allow ONLY network-agent-agw (1179054147220013056) SPIFFE ID to call check-gcp-subnet-ips-agw",
+    "effect": "ALLOW",
+    "principals": [
+      "principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/1179054147220013056"
+    ],
+    "operation": {
+      "permissions": [
+        "iap.googleapis.com/resources.egressViaIAP"
+      ]
+    },
+    "conditions": {
+      "iap.googleapis.com": {
+        "expression": "destination.is_registered == true && destination.agent_registry.resource_type == 'AGENT' && (destination.agent_registry.agent.name == 'projects/gcp-demo-02-307713/locations/us-central1/agents/check-gcp-subnet-ips-agw' || destination.agent_registry.agent.name == 'projects/gcp-demo-02-307713/locations/us-central1/agents/agentregistry-00000000-0000-0000-f25b-29d92d70d0d5' || destination.agent_registry.agent.name == 'projects/66063681189/locations/us-central1/agents/agentregistry-00000000-0000-0000-f25b-29d92d70d0d5')"
+      }
+    }
+  }
+]
+```
+- **How to read each UAP Rule (just like a Firewall Rule: `SOURCE` + `ACTION` + `DESTINATION`):**
+  1. **`"principals"` (SOURCE — *Who is calling*):**
+     - **Rule 1 (`principalSet://.../projects/66063681189`):** Matches *all* Agent Engine runtimes in your project so they can reach Vertex AI (`aiplatform.googleapis.com`) to run Gemini 2.5 Flash, Cloud Logging, and Telemetry.
+     - **Rule 2 (`principal://.../reasoningEngines/1179054147220013056`):** Matches **ONLY** `network-agent-agw`'s unique SPIFFE ID!
+  2. **`"effect": "ALLOW"` + `"permissions": ["iap.googleapis.com/resources.egressViaIAP"]` (ACTION):**
+     - Grants permission to egress through the IAP-governed Egress Agent Gateway.
+  3. **`"conditions"` (DESTINATION — *Where they are calling in Agent Registry*):**
+     - Evaluates a CEL expression against the destination URL's Agent Registry match:
+       - `destination.is_registered == true`: The destination URL must exist in Agent Registry.
+       - `destination.agent_registry.resource_type == 'ENDPOINT'` (Rule 1) vs. `'AGENT'` (Rule 2).
+       - `destination.agent_registry.agent.name == '...'`: Must match the `agentregistry-...` UUID of `check-gcp-subnet-ips-agw`.
+
+---
+
 ## 6.5 Parameterized Configs: What Changes When You Re-Deploy to a Different GCP Project?
 
 When you re-deploy this architecture in a **new GCP Project** (or re-create your agents from scratch, which generates new random **`ReasoningEngine` IDs** and new **`agentregistry-...` UUIDs**), you do **not** need to manually hunt through every YAML/JSON file.
@@ -267,7 +461,7 @@ source cfg/env.sh
 | **`CORE_GAPI_ENDPOINT_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 1) | Internal `agentregistry-...` UUID created when you register `core-gapi-services`. IAP v2 evaluates `destination.agent_registry.endpoint.name` against this UUID!<br>*Example:* `"agentregistry-00000000-0000-0000-444f-0dd5654527c5"` | `gcloud alpha agent-registry services describe core-gapi-services --location=$REGION --project=$PROJECT_ID --format="value(registryResource)" \| awk -F'/' '{print $NF}'` |
 | **`SUBNET_AGENT_AUTO_REG_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 2) | Internal `agentregistry-...` UUID auto-created in Agent Registry when `check-gcp-subnet-ips-agw` is deployed on Agent Platform.<br>*Example:* `"agentregistry-00000000-0000-0000-bf2d-ca1285f7103b"` | `gcloud alpha agent-registry agents list --location=$REGION --project=$PROJECT_ID --filter="displayName=check-gcp-subnet-ips-agw" --format="value(name)" \| head -n 1 \| awk -F'/' '{print $NF}'` |
 | **`SUBNET_AGENT_CUSTOM_REG_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 2) | Internal `agentregistry-...` UUID created when you register the custom `.mtls.` service `check-gcp-subnet-ips-agw` in Agent Registry.<br>*Example:* `"agentregistry-00000000-0000-0000-f25b-29d92d70d0d5"` | `gcloud alpha agent-registry services describe check-gcp-subnet-ips-agw --location=$REGION --project=$PROJECT_ID --format="value(registryResource)" \| awk -F'/' '{print $NF}'` |
-| **P4SA IAM Bindings** | **Hidden** (Project-level IAM) | Two Google-managed Service Agents in your new project include `PROJECT_NUMBER` in their email and need IAM roles:<br>1. `service-<PROJECT_NUMBER>@gcp-sa-dep.iam.gserviceaccount.com` $\rightarrow$ `roles/modelarmor.user`<br>2. `service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` $\rightarrow$ `roles/aiplatform.user` | See Step 1b below |
+| **P4SA IAM Bindings** | **Hidden** (Project-level IAM) | Two Google-managed Service Agents in your new project include `PROJECT_NUMBER` in their email and need IAM roles:<br>1. `service-<PROJECT_NUMBER>@gcp-sa-dep.iam.gserviceaccount.com` $\rightarrow$ `roles/modelarmor.user`<br>2. `service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` $\rightarrow$ `roles/aiplatform.user` | See Step 0d & Step 2b below |
 
 ---
 
@@ -427,15 +621,20 @@ Now let's put an **Ingress Agent Gateway (`agw-study-ingress`)** with **Model Ar
     --template-metadata-custom-prompt-safety-error-message="Blocked by Agent Gateway Model Armor: Prompt Injection / Unsafe Input Detected"
   ```
 
-#### Step 2b: Create the Ingress Agent Gateway (`CLIENT_TO_AGENT`) + AI Security
-- **Using Google Cloud Console UI (Preferred):**
+#### Step 2b: Create the Ingress Agent Gateway (`CLIENT_TO_AGENT`) + AI Security (Understanding the 3 `cfg/` Files Created Here!)
+When you create the Ingress Gateway with AI Security enabled, you are configuring **3 resources** defined in `cfg/`:
+1. **[`cfg/agw-study-ingress.yaml`](./cfg/agw-study-ingress.yaml)** (*The Proxy*): Sets `governedAccessPath: CLIENT_TO_AGENT` (inbound Reverse Proxy).
+2. **[`cfg/agw-study-ingress-svc-ext-modar.yaml`](./cfg/agw-study-ingress-svc-ext-modar.yaml)** (*The Model Armor Callout*): Calls `service: modelarmor.us-central1.rep.googleapis.com` with `forwardHeaders: [authorization]`, `failOpen: false`, and your `request_template_id` / `response_template_id`.
+3. **[`cfg/agw-study-ingress-authz-policy-modar.yaml`](./cfg/agw-study-ingress-authz-policy-modar.yaml)** (*The Wiring Rule*): Connects `target: agw-study-ingress` at stage `policyProfile: CONTENT_AUTHZ` (HTTP body/prompt inspection) to `authzExtension: agw-study-ingress-aisecurity-authzextension`.
+
+- **Using Google Cloud Console UI (Preferred — Creates all 3 resources in one click!):**
   1. Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways** $\rightarrow$ click **Create Gateway**.
   2. **Name:** `agw-study-ingress`
   3. **Region:** `us-central1`
   4. **Governed access path:** Select **Client-to-Agent (ingress)**.
   5. **AI Security (Model Armor):** Toggle **Enable AI Security** ON and select **`agw-study-ingress-modar-req-template`** for both the Request and Response templates.
-  6. Click **Create**. *(The UI automatically creates `agw-study-ingress-aisecurity-authzextension` and `agw-study-ingress-aisecurity-authzpolicy` so the **Edit** and **Remove** buttons work in the UI!)*
-  7. **Important 1-Time Cloud Shell Update after UI Creation:** Because the UI wizard sets `failOpen: true` and omits `forwardHeaders: ["authorization"]`, run these two commands in Cloud Shell so the gateway forwards the OAuth token to Model Armor and blocks unsafe prompts (`failOpen: false`):
+  6. Click **Create**. *(The UI automatically creates `agw-study-ingress`, `agw-study-ingress-aisecurity-authzextension`, and `agw-study-ingress-aisecurity-authzpolicy`!)*
+  7. **Important 1-Time Cloud Shell Update after UI Creation:** Because the UI wizard sets `failOpen: true` and omits `forwardHeaders: ["authorization"]` on `agw-study-ingress-aisecurity-authzextension`, run these two commands in Cloud Shell so the gateway forwards the OAuth token to Model Armor and blocks unsafe prompts (`failOpen: false`):
      ```bash
      cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
 
@@ -545,15 +744,20 @@ curl -s -X POST \
 
 #### Step 3: Create the Egress Agent Gateway (`agw-study-egress`) & Register Services in Agent Registry
 
-##### 3a. Create `agw-study-egress` (`AGENT_TO_ANYWHERE`) + IAP Access Authorization
-- **Using Google Cloud Console UI (Preferred):**
+##### 3a. Create `agw-study-egress` (`AGENT_TO_ANYWHERE`) + IAP Access Authorization (Understanding the 3 `cfg/` Files Created Here!)
+When you create the Egress Gateway with IAP Access Authorization enabled, you are configuring **3 resources** defined in `cfg/`:
+1. **[`cfg/agw-study-egress.yaml`](./cfg/agw-study-egress.yaml)** (*The Outbound Forward Proxy*): Sets `governedAccessPath: AGENT_TO_ANYWHERE` and links `registries:` (`us-central1` and `global` Agent Registries) so the proxy can map outbound destination URLs to Agent Registry entries.
+2. **[`cfg/agw-study-egress-svc-ext-iap.yaml`](./cfg/agw-study-egress-svc-ext-iap.yaml)** (*The IAP v2 Callout*): Calls `service: iap.googleapis.com` with `failOpen: false` (`Enforce` mode) and `metadata.iapPolicyVersion: "V2"` (Unified Access Policy).
+3. **[`cfg/agw-study-egress-authz-policy-iap.yaml`](./cfg/agw-study-egress-authz-policy-iap.yaml)** (*The Wiring Rule*): Connects `target: agw-study-egress` at stage `policyProfile: REQUEST_AUTHZ` (request/identity authorization) to `authzExtension: agw-study-egress-iap-authzextension`.
+
+- **Using Google Cloud Console UI (Preferred — Creates all 3 resources in one click!):**
   1. Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways** $\rightarrow$ click **Create Gateway**.
   2. **Name:** `agw-study-egress`
   3. **Region:** `us-central1`
   4. **Governed access path:** Select **Agent-to-Anywhere (egress)**.
   5. **Registries:** Select your `us-central1` and `global` Agent Registries.
   6. **Access authorization:** Select **Enforce** (or **Audit only**) and **Unified Access Policy (recommended)**.
-  7. Click **Create**. *(The UI automatically creates `agw-study-egress-iap-authzextension` and `agw-study-egress-iap-authzpolicy`.)*
+  7. Click **Create**. *(The UI automatically creates `agw-study-egress`, `agw-study-egress-iap-authzextension`, and `agw-study-egress-iap-authzpolicy`.)*
 - **Using `gcloud` CLI Only (Fallback if you didn't use the UI in 3a):**
   ```bash
   cd "$HOME/agent-gateway-study-01" && source cfg/env.sh
