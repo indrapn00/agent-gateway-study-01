@@ -153,6 +153,10 @@ export AGW_INGRESS_NAME="agw-study-ingress"
 #     AuthzPolicy is named `<AGW_INGRESS_NAME>-aisecurity-authzpolicy` (and Extension is
 #     `<AGW_INGRESS_NAME>-aisecurity-authzextension`).
 export MODEL_ARMOR_TEMPLATE_ID="${AGW_INGRESS_NAME}-modar-req-template"
+# Ensure `gcloud model-armor` CLI targets the regional REP endpoint for ${REGION}
+# (Without this, `gcloud model-armor` defaults to `https://modelarmor.us.rep.googleapis.com/`
+#  and fails with 403 PERMISSION_DENIED when REGION is outside the US, e.g. asia-southeast1)
+export CLOUDSDK_API_ENDPOINT_OVERRIDES_MODELARMOR="https://modelarmor.${REGION}.rep.googleapis.com/"
 export AGW_INGRESS_EXT_NAME="${AGW_INGRESS_NAME}-aisecurity-authzextension"
 export AGW_INGRESS_POLICY_NAME="${AGW_INGRESS_NAME}-aisecurity-authzpolicy"
 

@@ -354,14 +354,15 @@ Once Steps 1 and 2 are complete, the Gateway has zero attached policies and zero
 ### One-Command Helper Script (`cleanup_resources.sh`)
 If you ever want to automate any of the steps above:
 ```bash
-# Unbind agents + delete AuthzPolicies & Service Extensions ONLY (so you can click Delete on Gateways in the UI):
-./cleanup_resources.sh --policies-only
-
-# Delete all Gateway, Policy, Extension, Model Armor, UAP, and Registry resources (keeps Agents alive):
+# [DEFAULT] Delete EVERYTHING (Agents in Agent Platform, Cloud Run service, AuthzPolicies,
+# Service Extensions, Agent Gateways, Model Armor Template, UAP Policy/Binding, and Agent Registry):
 ./cleanup_resources.sh
 
-# Delete EVERYTHING including the ReasoningEngine Agents and Cloud Run service:
-./cleanup_resources.sh --include-agents
+# Keep the 3 deployed Agents running, but delete Gateways, Policies, Model Armor, UAP, and Registry:
+./cleanup_resources.sh --keep-agents
+
+# Unbind agents + delete AuthzPolicies & Service Extensions ONLY (so you can click Delete on Gateways in the UI):
+./cleanup_resources.sh --policies-only
 ```
 
 ---
