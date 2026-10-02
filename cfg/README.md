@@ -248,6 +248,24 @@ Open [`cfg/env.sh`](./env.sh), update the variables with your new values, and ru
 | **`SUBNET_AGENT_AUTO_REG_ID`** *(Hidden Agent Registry UUID!)* | Random `agentregistry-...` UUID auto-created in Agent Registry when `check-gcp-subnet-ips-agw` is deployed on Agent Platform. | `"agentregistry-00000000-0000-0000-bf2d-ca1285f7103b"` | `gcloud alpha agent-registry agents list --location=$REGION --project=$PROJECT_ID --filter="displayName=check-gcp-subnet-ips-agw" --format="value(name)" \| head -n 1 \| awk -F'/' '{print $NF}'` | `uap-rules-allow-subnet.json` (Rule 2 CEL `expression`) |
 | **`SUBNET_AGENT_CUSTOM_REG_ID`** *(Hidden Agent Registry UUID!)* | Random `agentregistry-...` UUID generated when you register the custom `.mtls.` service `check-gcp-subnet-ips-agw` in Agent Registry. | `"agentregistry-00000000-0000-0000-f25b-29d92d70d0d5"` | `gcloud alpha agent-registry services describe check-gcp-subnet-ips-agw --location=$REGION --project=$PROJECT_ID --format="value(registryResource)" \| awk -F'/' '{print $NF}'` | `uap-rules-allow-subnet.json` (Rule 2 CEL `expression`) |
 
+### 2.1 How to See `agentregistry-00000000-...` in the Google Cloud Console UI vs. `gcloud` CLI
+
+When you open **Agent Platform → Agents → Agent Registry** in the Console UI, the list tables display the **URN** (`urn:agent:...` or `urn:endpoint:...`) in the `Agent ID` / `Endpoint ID` column rather than the `agentregistry-00000000-...` resource name. Here is how to view the `agentregistry-00000000-...` IDs:
+
+- **In the Google Cloud Console UI:**
+  - **For Endpoints (`core-gapi-services`):** Go to **Agent Platform → Agents → Agent Registry → `Endpoints` tab**, click on **`gapi.core.services`**, and look at the **`Agent Registry Resource`** row on the **Endpoint Details** card (`projects/.../locations/us-central1/endpoints/agentregistry-00000000-...`) or the browser URL bar.
+  - **For Agents (`check-gcp-subnet-ips-agw`):** Go to **Agent Platform → Agents → Agent Registry → `Agents` tab**, click on **`check-gcp-subnet-ips-agw`**, and look at your **browser's URL address bar** (`.../agent-platform/registry/agents/us-central1/agentregistry-00000000-.../overview`). *(Note: The Agent Details card in the UI omits the `Agent Registry Resource` row and only shows it in the browser URL!)*
+- **Via `gcloud` CLI (Recommended — shows all UUIDs in a clean table):**
+  ```bash
+  source cfg/env.sh
+  gcloud alpha agent-registry agents list --location="${REGION}" --project="${PROJECT_ID}" \
+    --format="table(displayName, name.basename():label=AGENT_REGISTRY_UUID, agentId)"
+  gcloud alpha agent-registry endpoints list --location="${REGION}" --project="${PROJECT_ID}" \
+    --format="table(displayName, name.basename():label=ENDPOINT_REGISTRY_UUID, endpointId)"
+  gcloud alpha agent-registry services list --location="${REGION}" --project="${PROJECT_ID}" \
+    --format="table(name.basename():label=SERVICE_NAME, displayName, registryResource)"
+  ```
+
 ---
 
 ## 3. Non-File IAM Bindings That Also Use `PROJECT_NUMBER` When Moving to a New Project

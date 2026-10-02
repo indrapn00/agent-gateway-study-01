@@ -463,6 +463,59 @@ source cfg/env.sh
 | **`SUBNET_AGENT_CUSTOM_REG_ID`** | **Hidden** (Auto-generated Agent Registry UUID in UAP Rule 2) | Internal `agentregistry-...` UUID created when you register the custom `.mtls.` service `check-gcp-subnet-ips-agw` in Agent Registry.<br>*Example:* `"agentregistry-00000000-0000-0000-f25b-29d92d70d0d5"` | `gcloud alpha agent-registry services describe check-gcp-subnet-ips-agw --location=$REGION --project=$PROJECT_ID --format="value(registryResource)" \| awk -F'/' '{print $NF}'` |
 | **P4SA IAM Bindings** | **Hidden** (Project-level IAM) | Two Google-managed Service Agents in your new project include `PROJECT_NUMBER` in their email and need IAM roles:<br>1. `service-<PROJECT_NUMBER>@gcp-sa-dep.iam.gserviceaccount.com` $\rightarrow$ `roles/modelarmor.user`<br>2. `service-<PROJECT_NUMBER>@gcp-sa-aiplatform-re.iam.gserviceaccount.com` $\rightarrow$ `roles/aiplatform.user` | See Step 0d & Step 2b below |
 
+#### How to See `agentregistry-00000000-...` UUIDs in the Google Cloud Console UI vs. `gcloud` CLI
+
+When you open **Agent Platform $\rightarrow$ Agents $\rightarrow$ Agent Registry** (`/agent-platform/registry`) in the Google Cloud Console UI, you might wonder why you don't immediately see IDs like `agentregistry-00000000-0000-0000-444f-0dd5654527c5` in the table. Here is why — and where to find them in both the **UI** and **CLI**:
+
+1. **Why the UI Table Doesn't Show `agentregistry-00000000-...` Directly:**
+   - Every resource in `agentregistry.googleapis.com` has **two different identifiers**:
+     - **`agentId` / `endpointId` (URN format):** e.g. `urn:agent:projects-66063681189:...` or `urn:endpoint:projects-66063681189:...:services:core-gapi-services`. **This URN is what the Console UI table displays in the `Agent ID` / `Endpoint ID` column.**
+     - **`name` / `uid` (Resource Name with `agentregistry-<UUID>`):** e.g. `projects/gcp-demo-02-307713/locations/us-central1/endpoints/agentregistry-00000000-0000-0000-444f-0dd5654527c5`. **This `name` is what IAP v2 evaluates inside `cfg/uap-rules*.json` (`destination.agent_registry.endpoint.name` / `destination.agent_registry.agent.name`).**
+   - In addition, every time you delete and re-create a service or re-deploy an agent, Agent Registry generates a **brand-new random `agentregistry-00000000-...` UUID** (which is why `./render_configs.sh --auto-discover` automatically queries and updates them for you).
+
+2. **How to Find `agentregistry-00000000-...` in the Google Cloud Console UI:**
+   - **For Endpoints (e.g. `core-gapi-services`):**
+     1. Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Agent Registry** ([`https://console.cloud.google.com/agent-platform/registry/endpoints?project=gcp-demo-02-307713`](https://console.cloud.google.com/agent-platform/registry/endpoints?project=gcp-demo-02-307713)).
+     2. Click the **`Endpoints`** tab (`[Agents] [MCP Servers] [Endpoints]`). *(Note: Make sure the **Location** filter chip at the top includes `us-central1`!)*
+     3. Click on the endpoint name (e.g., **`gapi.core.services`** / **`Core Google APIs for Agent Runtime`**) to open its **Endpoint Details** page.
+     4. Look at the **`Agent Registry Resource`** field at the bottom of the **Endpoint Details** card (and also in your browser's URL address bar):
+        ```text
+        Agent Registry Resource: projects/gcp-demo-02-307713/locations/us-central1/endpoints/agentregistry-00000000-0000-0000-444f-0dd5654527c5
+        ```
+   - **For Agents (e.g. `check-gcp-subnet-ips-agw` and `network-agent-agw`):**
+     1. Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Agent Registry $\rightarrow$ `Agents` tab** ([`https://console.cloud.google.com/agent-platform/registry/agents?project=gcp-demo-02-307713`](https://console.cloud.google.com/agent-platform/registry/agents?project=gcp-demo-02-307713)).
+     2. Click on the agent name (e.g., **`check-gcp-subnet-ips-agw`**) to open its **Agent Details** page.
+     3. Unlike the Endpoint Details page, the **Agent Details** card only displays the URN under `Agent ID` and omits the `Agent Registry Resource` row — **however, look at your browser's URL address bar**:
+        ```text
+        https://console.cloud.google.com/agent-platform/registry/agents/us-central1/agentregistry-00000000-0000-0000-db12-414a103961f5/overview?project=gcp-demo-02-307713
+                                                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        ```
+        The segment right after `/agents/<region>/` in the browser URL is the exact `agentregistry-00000000-...` ID!
+
+3. **How to List All `agentregistry-00000000-...` IDs Directly via `gcloud` CLI:**
+   Run these 3 commands in Cloud Shell to see every `agentregistry-00000000-...` UUID side-by-side with its display name:
+   ```bash
+   source cfg/env.sh
+
+   # 1. List all discovered/registered Agents and their agentregistry-... UUIDs:
+   gcloud alpha agent-registry agents list \
+     --location="${REGION}" \
+     --project="${PROJECT_ID}" \
+     --format="table(displayName, name.basename():label=AGENT_REGISTRY_UUID, agentId)"
+
+   # 2. List all registered Endpoints (e.g. core-gapi-services) and their agentregistry-... UUIDs:
+   gcloud alpha agent-registry endpoints list \
+     --location="${REGION}" \
+     --project="${PROJECT_ID}" \
+     --format="table(displayName, name.basename():label=ENDPOINT_REGISTRY_UUID, endpointId)"
+
+   # 3. List user-created Agent Registry Services and the underlying registryResource UUID they generated:
+   gcloud alpha agent-registry services list \
+     --location="${REGION}" \
+     --project="${PROJECT_ID}" \
+     --format="table(name.basename():label=SERVICE_NAME, displayName, registryResource)"
+   ```
+
 ---
 
 ## 7. Complete Step-by-Step Build & "Before vs. After" Testing Guide (Console UI + `gcloud` CLI)
