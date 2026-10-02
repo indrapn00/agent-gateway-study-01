@@ -69,7 +69,7 @@ flowchart LR
 
 ---
 
-## 1.5 Re-Deploying to a Different GCP Project or With New ReasoningEngine IDs
+## 1.5 Re-Deploying to a Different GCP Project or Region & Critical Egress Gateway Re-Deploy Caveat (`BKI #16`)
 
 When you move to a **different GCP Project**, **different Organization**, **different Region**, or re-create your agents on Agent Platform (which assigns new random **`ReasoningEngine` IDs** and new random **`agentregistry-...` UUIDs**):
 
@@ -84,9 +84,41 @@ When you move to a **different GCP Project**, **different Organization**, **diff
    ```
 3. Every generated `.yaml` and `.json` file in `cfg/` also includes inline comments/descriptions and examples showing which fields change across projects.
 
+> [!CAUTION]
+> ### ⚠️ CRITICAL PREVIEW BUG (`BKI #16`): Deleting & Re-Deploying an Egress Agent Gateway (`AGENT_TO_ANYWHERE`) in the Same Region
+>
+> During study and testing, it is very common to delete and recreate resources. However, **Ingress** and **Egress** Agent Gateways behave very differently when deleted and recreated in the same region:
+>
+> * **Ingress Agent Gateway (`agw-study-ingress` / `CLIENT_TO_AGENT`) — Safe to Delete & Recreate Anytime:**
+>   Configured on Vertex AI's frontend router. You can unbind, delete, and recreate `agw-study-ingress` in `us-central1` as many times as you like without any issues.
+> * **Egress Agent Gateway (`agw-study-egress` / `AGENT_TO_ANYWHERE`) — HITS `BKI #16` IF DELETED & RECREATED IN THE SAME REGION:**
+>   1. **Why it breaks on re-deploy:** The first time you bind an `AGENT_TO_ANYWHERE` Egress Gateway to an agent in a region (e.g., `us-central1`), Vertex AI provisions singleton Secure Web Proxy (SWP) networking resources inside your project's regional shared tenant project (`cc798cdb3e124465ap-tp` in `us-central1`), including a custom `240.0.0.0/4` VPC and a Traffic Director wildcard route named `aersvd-swp-http-route-agw-{binding_id}` (`hostnames: ["*"]`).
+>   2. Because `aersvd-swp-http-route-*` uses a Traffic Director reserved prefix (`aersvd-`), standard automated deprovisioning cannot delete that wildcard route when you unbind/delete `agw-study-egress`.
+>   3. When you create a new `agw-study-egress` in `us-central1` and try to bind `network-agent-agw` to it, Vertex AI generates a new `{binding_id}` and tries to create a second wildcard route (`hostnames: ["*"]`) in the same `us-central1` tenant project—which fails with `code: 13 (INTERNAL)`.
+>
+> #### ❓ Can I Just Create `agw-study-egress` in Another Region While Keeping My Agents in `us-central1`?
+> **No — you CANNOT mix regions between an Agent and its bound Agent Gateway:**
+> 1. **Google Cloud Platform Rule:** Vertex AI Agent Engine (`ReasoningEngineValidator`) strictly enforces that an `AgentGateway` and the `ReasoningEngine` (Agent) bound to it **must live in the exact same region**. Trying to bind a `us-central1` agent to an `asia-southeast1` gateway immediately fails with:
+>    `INVALID_ARGUMENT: Agent Gateway location in spec.deployment_spec.agent_gateway_config.agent_to_anywhere_config.agent_gateway must match the location of the Reasoning Engine`.
+> 2. **How Our Scripts Work (`cfg/env.sh` is "All-or-Nothing" per Region):** All scripts ([`render_configs.sh`](./render_configs.sh), [`deploy_agent.py`](./deploy_agent.py), [`cleanup_resources.sh`](./cleanup_resources.sh)) and all 8 rendered files in [`cfg/`](./cfg/) read a **single `export REGION="us-central1"`** variable from **[`cfg/env.sh`](./cfg/env.sh)**.
+>
+> | Scenario | Will It Work? | Why? |
+> | :--- | :--- | :--- |
+> | **Scenario A:** Keep agents in `us-central1`, create **only** `agw-study-egress` in another region (e.g. `asia-southeast1`) | ❌ **No (Breaks)** | Vertex AI requires the Agent and its bound Agent Gateway to be in the **same region**, and `cfg/env.sh` uses a single `REGION` variable for the whole stack. |
+> | **Scenario B:** Change `export REGION="asia-southeast1"` (or `us-east1`) in [`cfg/env.sh`](./cfg/env.sh), run `./render_configs.sh`, and deploy **both** Agents + **both** Gateways + Model Armor + Agent Registry in that region | ✅ **Yes (Works 100%)** | `asia-southeast1`, `us-east1`, `us-west1`, and `europe-west1` all support `AgentGateway`, `ModelArmor`, and `AgentRegistry`, and have a clean regional tenant project with no orphaned `BKI #16` route. |
+>
+> #### 💡 Two Golden Rules to Avoid Getting Stuck on Egress Gateway:
+> 1. **Golden Rule #1 (Once `agw-study-egress` is bound in a region, DO NOT delete `agw-study-egress` or unbind all agents from it!):**
+>    To test "Before vs. After" on Egress Gateway, **never delete `agw-study-egress`**. Instead, keep `agw-study-egress` bound to `network-agent-agw` and simply toggle the **Unified Access Policy (`uap-policy-agw-study-egress`)** between [`cfg/uap-rules.json`](./cfg/uap-rules.json) (Rule 1 only = Default Deny) and [`cfg/uap-rules-allow-subnet.json`](./cfg/uap-rules-allow-subnet.json) (Rule 1 + Rule 2 = Explicit Allow), or update `network-agent-agw` in-place with `--update-existing` while keeping `--agent-gateway-egress` attached. As long as the gateway stays bound, Vertex AI reuses the existing SWP route (`BINDING_EXISTING_NO_CHANGE`) and never triggers the broken deprovision path!
+> 2. **Golden Rule #2 (If a region's tenant project is already stuck with `BKI #16`, switch `REGION` in `cfg/env.sh`):**
+>    Edit **one line** in **[`cfg/env.sh`](./cfg/env.sh)** (`export REGION="asia-southeast1"` or `export REGION="us-east1"`), run `./render_configs.sh && source cfg/env.sh`, and deploy the full lab in that clean region.
+
 ---
 
 ## 1.6 Step-by-Step Self-Service Deletion Guide (Google Cloud Console UI + `gcloud` / `curl`)
+
+> [!WARNING]
+> **Before deleting `agw-study-egress` (`AGENT_TO_ANYWHERE`):** Remember **Preview Bug `BKI #16`** above! If you unbind and delete an Egress Agent Gateway (`agw-study-egress`) in a region where an agent was bound to it, the regional shared tenant project retains an orphaned `aersvd-swp-http-route-*` wildcard route that prevents binding a newly recreated Egress Gateway in that same region. **Only delete `agw-study-egress` when you are completely finished testing Egress in that region!** (Deleting and recreating `agw-study-ingress` has no such limitation.)
 
 Because Agent Gateway resources have a strict dependency chain:
 $$\text{ReasoningEngine Agent} \xrightarrow{\text{uses}} \text{AgentGateway} \xleftarrow{\text{attaches}} \text{AuthzPolicy} \xrightarrow{\text{calls}} \text{AuthzExtension}$$
@@ -245,8 +277,8 @@ To preserve continuity with `simple-agent-02`, **zero functional changes** were 
 
 | Component | Region | Live Resource Name / URL / SPIFFE Identity |
 | :--- | :--- | :--- |
-| **`check-gcp-subnet-ips-agw`** (Specialist Agent on Agent Platform) | `us-central1` | **ReasoningEngine:** `projects/66063681189/locations/us-central1/reasoningEngines/1020302260355203072` (`${SUBNET_ENGINE_ID}`)<br>**Effective SPIFFE Identity (`AGENT_IDENTITY`):**<br>`principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/1020302260355203072`<br>**Bound Ingress Gateway:** `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress` |
-| **`network-agent-agw`** (Mode 2 Orchestrator on Agent Platform) | `us-central1` | **ReasoningEngine:** `projects/66063681189/locations/us-central1/reasoningEngines/1179054147220013056` (`${NETWORK_ENGINE_ID}`)<br>**Effective SPIFFE Identity (`AGENT_IDENTITY`):**<br>`principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/1179054147220013056` |
+| **`check-gcp-subnet-ips-agw`** (Specialist Agent on Agent Platform) | `us-central1` | **ReasoningEngine:** `projects/66063681189/locations/us-central1/reasoningEngines/2324340643083583488` (`${SUBNET_ENGINE_ID}`)<br>**Effective SPIFFE Identity (`AGENT_IDENTITY`):**<br>`principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/2324340643083583488`<br>**Bound Ingress Gateway:** `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress` |
+| **`network-agent-agw`** (Mode 2 Orchestrator on Agent Platform) | `us-central1` | **ReasoningEngine:** `projects/66063681189/locations/us-central1/reasoningEngines/989023353568231424` (`${NETWORK_ENGINE_ID}`)<br>**Effective SPIFFE Identity (`AGENT_IDENTITY`):**<br>`principal://agents.global.org-304553879287.system.id.goog/resources/aiplatform/projects/66063681189/locations/us-central1/reasoningEngines/989023353568231424` |
 | **`network-agent-agw`** (Mode 3 Orchestrator on Cloud Run with Web UI) | `asia-southeast2` | **Cloud Run URL:** `https://network-agent-agw-66063681189.asia-southeast2.run.app`<br>**Target Sub-Agent:** `projects/66063681189/locations/us-central1/reasoningEngines/${SUBNET_ENGINE_ID}` |
 | **Ingress Agent Gateway (`CLIENT_TO_AGENT`) + Model Armor (`CONTENT_AUTHZ`)** | `us-central1` | **Gateway:** `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-ingress`<br>**AuthzPolicy (UI-compatible name):** `projects/gcp-demo-02-307713/locations/us-central1/authzPolicies/agw-study-ingress-aisecurity-authzpolicy`<br>**AuthzExtension (UI-compatible name):** `projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-ingress-aisecurity-authzextension`<br>**Model Armor Template:** `projects/gcp-demo-02-307713/locations/us-central1/templates/agw-study-ingress-modar-req-template` |
 | **Egress Agent Gateway (`AGENT_TO_ANYWHERE`) + IAP v2 UAP (`REQUEST_AUTHZ`)** | `us-central1` / `global` | **Gateway:** `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress`<br>**AuthzPolicy (UI-compatible name):** `projects/gcp-demo-02-307713/locations/us-central1/authzPolicies/agw-study-egress-iap-authzpolicy`<br>**AuthzExtension (UI-compatible name):** `projects/gcp-demo-02-307713/locations/us-central1/authzExtensions/agw-study-egress-iap-authzextension`<br>**UAP AccessPolicy:** `projects/gcp-demo-02-307713/locations/global/accessPolicies/uap-policy-agw-study-egress`<br>**UAP PolicyBinding:** `projects/gcp-demo-02-307713/locations/global/policyBindings/uap-binding-agw-study-egress` |

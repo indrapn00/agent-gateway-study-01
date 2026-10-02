@@ -933,13 +933,34 @@ python3 deploy_agent.py \
 ```
 After this command completes, open **Agent Platform $\rightarrow$ Deployments $\rightarrow$ `network-agent-agw` $\rightarrow$ Update service configuration $\rightarrow$ Deployment details** in the Console UI and verify that **`Agent to Anywhere (Egress)`** shows `projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agw-study-egress`.
 
-> **⚠️ Known Preview Limitation (`BKI #16` — Re-binding a Recreated `AGENT_TO_ANYWHERE` Gateway in the Same Region):**
-> When you bind an Egress Agent Gateway (`AGENT_TO_ANYWHERE`) in a region for the first time, Vertex AI provisions singleton Secure Web Proxy (SWP) networking resources inside your project's regional shared tenant project (`cc798cdb3e124465ap-tp` in `us-central1`), including a custom VPC (`240.0.0.0/4`) and a Traffic Director wildcard route named `aersvd-swp-http-route-agw-{binding_id}` (`hostnames: ["*"]`).
-> - Because `aersvd-swp-http-route-*` uses a Traffic Director reserved prefix (`aersvd-`), deleting and recreating `agw-study-egress` in the same region (`us-central1`) leaves the previous `aersvd-swp-http-route-*` route in the shared tenant project (`BKI #16`), which causes subsequent `AGENT_TO_ANYWHERE` bindings in `us-central1` to return `code: 13 (INTERNAL)` during `CreateAgentGatewayMasterTask`.
-> - **What works unaffected in `us-central1`:**
->   1. **Ingress Agent Gateway (`agw-study-ingress` / `CLIENT_TO_AGENT`)** bound to **`check-gcp-subnet-ips-agw`** (including Model Armor inspection + Service Extensions) works 100% normally and can be bound/unbound/recreated freely at any time.
->   2. **Unified Access Policy (`uap-policy-agw-study-egress`)** and **Agent Registry (`core-gapi-services` & `check-gcp-subnet-ips-agw`)** work 100% normally.
->   3. If you need to bind a brand-new `AGENT_TO_ANYWHERE` Egress Gateway after deleting a prior one in `us-central1`, deploy the Egress lab in a clean supported region (such as `asia-southeast1` or `europe-west1`) where the regional tenant project has no orphaned `aersvd-swp-http-route-*` wildcard route.
+> [!CAUTION]
+> ### ⚠️ Critical Preview Bug (`BKI #16`) When Deleting & Re-Deploying an Egress Agent Gateway (`AGENT_TO_ANYWHERE`) in the Same Region
+>
+> When you are studying and testing Agent Gateway, it is natural to delete and re-deploy resources. However, **Ingress** and **Egress** Gateways behave very differently when deleted and recreated in the same region:
+>
+> 1. **Ingress Agent Gateway (`agw-study-ingress` / `CLIENT_TO_AGENT`) — Safe to Delete & Recreate Anytime:**
+>    Configured on Vertex AI's frontend router. You can unbind, delete, and recreate `agw-study-ingress` in `us-central1` as many times as you like.
+> 2. **Egress Agent Gateway (`agw-study-egress` / `AGENT_TO_ANYWHERE`) — HITS `BKI #16` IF DELETED & RECREATED IN THE SAME REGION:**
+>    - When you bind an Egress Agent Gateway (`AGENT_TO_ANYWHERE`) in a region for the first time, Vertex AI provisions singleton Secure Web Proxy (SWP) networking resources inside your project's regional shared tenant project (`cc798cdb3e124465ap-tp` in `us-central1`), including a custom VPC (`240.0.0.0/4`) and a Traffic Director wildcard route named `aersvd-swp-http-route-agw-{binding_id}` (`hostnames: ["*"]`).
+>    - Because `aersvd-swp-http-route-*` uses a Traffic Director reserved prefix (`aersvd-`), standard automated deprovisioning cannot delete that wildcard route when `agw-study-egress` is unbound/deleted.
+>    - If you then recreate `agw-study-egress` in the **same region (`us-central1`)** and try to bind `network-agent-agw` to it, Vertex AI generates a new `{binding_id}` and tries to create a second wildcard route (`hostnames: ["*"]`) in the same `us-central1` tenant project—which fails with `code: 13 (INTERNAL)` during `CreateAgentGatewayMasterTask`.
+>
+> #### ❓ Can I Create *Only* `agw-study-egress` in Another Region While Keeping My Agents in `us-central1`?
+> **No — you CANNOT mix regions between an Agent and its bound Agent Gateway:**
+> - **Google Cloud Platform Rule:** Vertex AI Agent Engine (`ReasoningEngineValidator`) strictly requires a `ReasoningEngine` (Agent) and its bound `AgentGateway` to live in the **exact same region**. Binding a `us-central1` agent to an `asia-southeast1` gateway is rejected with:
+>   `INVALID_ARGUMENT: Agent Gateway location in spec.deployment_spec.agent_gateway_config.agent_to_anywhere_config.agent_gateway must match the location of the Reasoning Engine`.
+> - **How Our Scripts Handle Region (`cfg/env.sh` is "All-or-Nothing" per Region):** Every script ([`render_configs.sh`](./render_configs.sh), [`deploy_agent.py`](./deploy_agent.py), [`cleanup_resources.sh`](./cleanup_resources.sh)) and all 8 rendered files in [`cfg/`](./cfg/) read the single **`export REGION="us-central1"`** variable from **[`cfg/env.sh`](./cfg/env.sh)**.
+>
+> | Scenario | Will It Work? | Why? |
+> | :--- | :--- | :--- |
+> | **Scenario A:** Keep agents in `us-central1`, create **only** `agw-study-egress` in another region (e.g. `asia-southeast1`) | ❌ **No (Breaks)** | Vertex AI requires the Agent and its bound Agent Gateway to be in the **same region**, and `cfg/env.sh` uses a single `REGION` variable for the whole stack. |
+> | **Scenario B:** Change `export REGION="asia-southeast1"` (or `us-east1`) in [`cfg/env.sh`](./cfg/env.sh), run `./render_configs.sh && source cfg/env.sh`, and deploy **both** Agents + **both** Gateways + Model Armor + Agent Registry in that region | ✅ **Yes (Works 100%)** | `asia-southeast1`, `us-east1`, `us-west1`, and `europe-west1` support `AgentGateway`, `ModelArmor`, and `AgentRegistry`, and have a clean regional tenant project with no orphaned `BKI #16` route. |
+>
+> #### 💡 Two Golden Rules for Testing Egress Gateway Without Getting Stuck:
+> 1. **Golden Rule #1 (Once `agw-study-egress` is bound in a region, DO NOT delete `agw-study-egress` or unbind all agents from it!):**
+>    To test "Before vs. After" on Egress Gateway, **never delete `agw-study-egress`**. Keep `agw-study-egress` bound to `network-agent-agw` and simply toggle the **Unified Access Policy (`uap-policy-agw-study-egress`)** in Step 4b vs. Step 4c (`cfg/uap-rules.json` vs. `cfg/uap-rules-allow-subnet.json`), or update `network-agent-agw` in-place with `--update-existing` while keeping `--agent-gateway-egress` attached. As long as the gateway stays bound, Vertex AI reuses the existing SWP route (`BINDING_EXISTING_NO_CHANGE`) and never triggers the broken deprovision path!
+> 2. **Golden Rule #2 (To unblock Egress Gateway testing right now after `us-central1` hit `BKI #16`):**
+>    Change **one line** in **[`cfg/env.sh`](./cfg/env.sh)** (`export REGION="asia-southeast1"` or `export REGION="us-east1"`), run `./render_configs.sh && source cfg/env.sh`, and deploy the stack in that clean region.
 
 ---
 
@@ -1164,10 +1185,15 @@ curl -s -X PATCH \
    - The Model Armor Service Extension (`modelarmor.us-central1.rep.googleapis.com`) inspects **both** the incoming request (`request_template_id`) and the outgoing streaming response (`response_template_id`), and requires the caller's OAuth token to be forwarded (`forwardHeaders: ["authorization"]`).
    - If `response_template_id` points to a non-existent template or `forwardHeaders: ["authorization"]` is omitted, the gateway returns `404` or `403` when inspecting the response stream. Pointing both `request_template_id` and `response_template_id` in [`cfg/agw-study-ingress-svc-ext-modar.yaml`](./cfg/agw-study-ingress-svc-ext-modar.yaml) to `agw-study-ingress-modar-req-template` (and granting `roles/modelarmor.user` to `service-66063681189@gcp-sa-dep.iam.gserviceaccount.com`) resolved this completely.
 
-3. **Gotcha #3 — Single Egress Agent Gateway (`AGENT_TO_ANYWHERE`) Per Region in a Shared Regional Tenant Project:**
-   - Under the hood, when an Agent Platform `ReasoningEngine` is bound to an Egress Agent Gateway (`AGENT_TO_ANYWHERE`), Vertex AI provisions a custom VPC, catch-all DNS response policy (`*`), PSC endpoint, and wildcard Secure Web Proxy routes (`aersvd-swp-http-route-...`, `aersvd-swp-tcp-route-...`) inside the customer's **single shared regional tenant project** (`cc798cdb3e124465ap-tp` in `us-central1`).
-   - Because `gcp-demo-02-307713` already had an older Egress Agent Gateway in `us-central1` (`projects/gcp-demo-02-307713/locations/us-central1/agentGateways/agent-gateway`, created on `2026-05-11` during earlier PSC `agent-gateway-na` testing), the shared `us-central1` tenant project already has wildcard routes bound to that original gateway (`BKI #16`).
-   - **Best Practice:** Either reuse the single regional Egress Agent Gateway per region, or deploy new Egress Agent Gateway experiments in a clean region where no prior `AGENT_TO_ANYWHERE` gateway was bound (such as `asia-southeast1` or `europe-west1`).
+3. **Gotcha #3 — Critical Preview Bug (`BKI #16`) When Deleting & Re-Deploying an Egress Agent Gateway (`AGENT_TO_ANYWHERE`) in the Same Region (And Why You Cannot Mix Regions):**
+   - **What happens under the hood:** When an Agent Platform `ReasoningEngine` is bound to an Egress Agent Gateway (`AGENT_TO_ANYWHERE`) for the first time in a region, Vertex AI provisions a custom `240.0.0.0/4` VPC, catch-all DNS response policy (`*`), PSC endpoint, and wildcard Secure Web Proxy routes (`aersvd-swp-http-route-agw-{binding_id}`, `aersvd-swp-tcp-route-agw-{binding_id}` with `hostnames: ["*"]`) inside the customer's **single shared regional tenant project** (`cc798cdb3e124465ap-tp` in `us-central1`).
+   - **Why deleting and recreating `agw-study-egress` in the same region breaks (`BKI #16`):** Because `aersvd-swp-http-route-*` uses a Traffic Director reserved prefix (`aersvd-`), standard automated deprovisioning cannot delete that wildcard route when `agw-study-egress` is unbound and deleted. If you then recreate `agw-study-egress` in the **same region (`us-central1`)** and try to bind `network-agent-agw` to it, Vertex AI creates a new `{binding_id}` and tries to provision a second wildcard route (`hostnames: ["*"]`) in the same regional tenant project—failing with `code: 13 (INTERNAL)`. *(Note: Ingress Agent Gateway `agw-study-ingress` / `CLIENT_TO_AGENT` does NOT have this limitation and can be unbound, deleted, and recreated in `us-central1` freely.)*
+   - **Why you CANNOT create *only* `agw-study-egress` in another region while keeping your agents in `us-central1`:**
+     1. **Google Cloud Platform Rule:** Vertex AI (`ReasoningEngineValidator`) strictly requires a `ReasoningEngine` (Agent) and its bound `AgentGateway` to live in the **exact same region** (`INVALID_ARGUMENT: Agent Gateway location in spec.deployment_spec.agent_gateway_config.agent_to_anywhere_config.agent_gateway must match the location of the Reasoning Engine`).
+     2. **How Our Scripts Work (`cfg/env.sh` is "All-or-Nothing" per Region):** All scripts ([`render_configs.sh`](./render_configs.sh), [`deploy_agent.py`](./deploy_agent.py), [`cleanup_resources.sh`](./cleanup_resources.sh)) and all 8 rendered files in [`cfg/`](./cfg/) read a single **`export REGION="us-central1"`** variable from **[`cfg/env.sh`](./cfg/env.sh)**.
+   - **How to avoid getting stuck (and how to unblock Egress Gateway testing):**
+     - **Once `agw-study-egress` is bound in a region, DO NOT delete `agw-study-egress` or unbind all agents from it** while you are still studying Egress in that region. Toggle UAP rules (`cfg/uap-rules.json` vs. `cfg/uap-rules-allow-subnet.json`) or update `network-agent-agw` in-place with `--update-existing` while keeping `--agent-gateway-egress` attached.
+     - **If a region (`us-central1`) is already affected by `BKI #16`:** Change **one line** in **[`cfg/env.sh`](./cfg/env.sh)** (`export REGION="asia-southeast1"` or `export REGION="us-east1"`), run `./render_configs.sh && source cfg/env.sh`, and deploy the full stack (both Agents + both Gateways + Model Armor + Agent Registry) in that clean region.
 
 4. **Gotcha #4 — Why the Google Cloud Console UI Disabled the Gateway `Delete` Button (`"Remove all associated authz policies before deleting the gateway"`) & Hidden Naming Rule:**
    - In the Cloud Console UI (**Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways $\rightarrow$ `<gateway>`**), the **Delete** button is disabled whenever any `AuthzPolicy` + `AuthzExtension` is attached to the gateway (`serviceExtensions().length > 0`).
@@ -1184,6 +1210,12 @@ curl -s -X PATCH \
 
 ## 10. Step-by-Step Deletion & Re-Deployment Guide (UI-First Workflow + `gcloud` Fallback)
 
+> [!WARNING]
+> **Important Before Deleting `agw-study-egress` (`AGENT_TO_ANYWHERE`):**
+> Because of **Preview Bug `BKI #16`** (see Gotcha #3 above), unbinding and deleting an Egress Agent Gateway (`agw-study-egress`) in a region where an agent was bound to it leaves an orphaned `aersvd-swp-http-route-*` wildcard route in that region's shared tenant project, which blocks binding a newly recreated Egress Gateway in the **same region**.
+> - **Do NOT delete `agw-study-egress`** if you plan to keep testing Egress Gateway in that same region!
+> - If a region (`us-central1`) is already affected by `BKI #16`, switch `export REGION="asia-southeast1"` (or `us-east1`) in **[`cfg/env.sh`](./cfg/env.sh)**, run `./render_configs.sh && source cfg/env.sh`, and deploy the full stack in that clean region.
+
 ### 10.1 The Reverse-Dependency Deletion Order
 
 Just like deleting a VPC Subnet requires deleting or detaching the VM Instances and Firewall Rules that reference it first, Agent Gateway resources must be deleted in **strict reverse dependency order**:
@@ -1197,12 +1229,12 @@ flowchart TD
 
 | Deletion Step | Resource Type | Can It Be Deleted in the UI? | Exact UI Steps (Preferred) | Self-Service `gcloud` / `curl` Commands |
 | :--- | :--- | :--- | :--- | :--- |
-| **Step 1** | **Agent Binding / ReasoningEngine Agents** (`check-gcp-subnet-ips-agw`, `network-agent-agw`) | **Yes** (Delete Agent in UI — *safe, will NOT stall the Gateway!*)<br>**CLI** (Unbind Gateway while keeping Agent alive) | **To delete Agent too:** Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Agent Engine** (`us-central1`), select `check-gcp-subnet-ips-agw` (and `network-agent-agw`), and click **Delete**. *(Deleting the Agent automatically releases its reference lock on the Gateway!)* | **To keep Agent alive & only unbind Gateway:**<br>`source cfg/env.sh`<br>`curl -s -X PATCH -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" -d '{"spec":{"deploymentSpec":{"agentGatewayConfig":{}}}}'`<br>*(Wait ~30s, or run `./cleanup_resources.sh --policies-only`)* |
-| **Step 2** | **AuthzPolicies & Service Extensions** (`AI Security` / `Access authorization`) | **Yes — IF created in UI or named `<gw>-aisecurity-authzpolicy` / `<gw>-iap-authzpolicy`!**<br>*(No in `Network Services -> Service Extensions`)* | Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways**, click on `agw-study-ingress` (or `agw-study-egress`), and click the blue **`Remove`** button at the top-right of the **AI Security** card and/or **Access authorization** card. *(This deletes both the `AuthzPolicy` and `AuthzExtension` together!)* | **MUST delete `AuthzPolicy` FIRST, then `AuthzExtension` SECOND:**<br>`gcloud beta network-security authz-policies delete <POLICY_NAME> --location=us-central1`<br>`gcloud beta service-extensions authz-extensions delete <EXT_NAME> --location=us-central1`<br>*(Or run `./cleanup_resources.sh --policies-only`)* |
-| **Step 3** | **Agent Gateways** (`agw-study-ingress`, `agw-study-egress`) | **Yes (100% UI)** | Once Steps 1 & 2 are done, on **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways $\rightarrow$ `<gateway>`**, click **`Delete`**. | `gcloud alpha network-services agent-gateways delete agw-study-ingress --location=us-central1`<br>`gcloud alpha network-services agent-gateways delete agw-study-egress --location=us-central1` |
-| **Step 4** | **Model Armor Template** (`agw-study-ingress-modar-req-template`) | **Yes (100% UI)** | Go to **Security $\rightarrow$ Model Armor $\rightarrow$ Templates**, select `agw-study-ingress-modar-req-template`, and click **`Delete`**. | `gcloud model-armor templates delete agw-study-ingress-modar-req-template --location=us-central1` |
+| **Step 1** | **Agent Binding / ReasoningEngine Agents** (`check-gcp-subnet-ips-agw`, `network-agent-agw`) | **Yes** (Delete Agent in UI — *safe, will NOT stall the Gateway!*)<br>**CLI** (Unbind Gateway while keeping Agent alive) | **To delete Agent too:** Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Agent Engine** (`${REGION}`), select `check-gcp-subnet-ips-agw` (and `network-agent-agw`), and click **Delete**. *(Deleting the Agent automatically releases its reference lock on the Gateway!)* | **To keep Agent alive & only unbind Gateway:**<br>`source cfg/env.sh`<br>`curl -s -X PATCH -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://${REGION}-aiplatform.googleapis.com/v1beta1/projects/${PROJECT_ID}/locations/${REGION}/reasoningEngines/${SUBNET_ENGINE_ID}?updateMask=spec.deployment_spec.agent_gateway_config" -d '{"spec":{"deploymentSpec":{"agentGatewayConfig":{}}}}'`<br>*(Wait ~30s, or run `./cleanup_resources.sh --policies-only`)* |
+| **Step 2** | **AuthzPolicies & Service Extensions** (`AI Security` / `Access authorization`) | **Yes — IF created in UI or named `<gw>-aisecurity-authzpolicy` / `<gw>-iap-authzpolicy`!**<br>*(No in `Network Services -> Service Extensions`)* | Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways**, click on `agw-study-ingress` (or `agw-study-egress`), and click the blue **`Remove`** button at the top-right of the **AI Security** card and/or **Access authorization** card. *(This deletes both the `AuthzPolicy` and `AuthzExtension` together!)* | **MUST delete `AuthzPolicy` FIRST, then `AuthzExtension` SECOND:**<br>`gcloud beta network-security authz-policies delete <POLICY_NAME> --location=${REGION}`<br>`gcloud beta service-extensions authz-extensions delete <EXT_NAME> --location=${REGION}`<br>*(Or run `./cleanup_resources.sh --policies-only`)* |
+| **Step 3** | **Agent Gateways** (`agw-study-ingress`, `agw-study-egress`) | **Yes (100% UI)** | Once Steps 1 & 2 are done, on **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways $\rightarrow$ `<gateway>`**, click **`Delete`**. | `gcloud alpha network-services agent-gateways delete agw-study-ingress --location=${REGION}`<br>`gcloud alpha network-services agent-gateways delete agw-study-egress --location=${REGION}` |
+| **Step 4** | **Model Armor Template** (`agw-study-ingress-modar-req-template`) | **Yes (100% UI)** | Go to **Security $\rightarrow$ Model Armor $\rightarrow$ Templates**, select `agw-study-ingress-modar-req-template`, and click **`Delete`**. | `gcloud model-armor templates delete agw-study-ingress-modar-req-template --location=${REGION}` |
 | **Step 5** | **IAM Unified Access Policy (UAP) & PolicyBinding** (`uap-policy-agw-study-egress`) | **Yes / CLI** | Go to **IAM & Admin $\rightarrow$ Access Policies** to remove the binding and policy. | **Delete Binding FIRST, then Policy SECOND:**<br>`gcloud iam policy-bindings delete uap-binding-agw-study-egress --location=global`<br>`gcloud iam access-policies delete uap-policy-agw-study-egress --location=global` |
-| **Step 6** | **Custom Agent Registry Services** (`core-gapi-services`, `check-gcp-subnet-ips-agw`) | **Yes (100% UI)** | Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Agent Registry $\rightarrow$ Services** (`us-central1`), select `core-gapi-services` and `check-gcp-subnet-ips-agw`, and click **`Delete`**. | `gcloud alpha agent-registry services delete core-gapi-services --location=us-central1`<br>`gcloud alpha agent-registry services delete check-gcp-subnet-ips-agw --location=us-central1` |
+| **Step 6** | **Custom Agent Registry Services** (`core-gapi-services`, `check-gcp-subnet-ips-agw`) | **Yes (100% UI)** | Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Agent Registry $\rightarrow$ Services** (`${REGION}`), select `core-gapi-services` and `check-gcp-subnet-ips-agw`, and click **`Delete`**. | `gcloud alpha agent-registry services delete core-gapi-services --location=${REGION}`<br>`gcloud alpha agent-registry services delete check-gcp-subnet-ips-agw --location=${REGION}` |
 
 ---
 
@@ -1210,23 +1242,26 @@ flowchart TD
 
 If you prefer using the **Google Cloud Console UI** for re-deploying the Agent Gateway stack:
 
-1. **Step 1 (UI) — Create the Model Armor Template first:**
+1. **Step 0 (Choose Your Target Region in [`cfg/env.sh`](./cfg/env.sh) First):**
+   - Remember that **all components** (Model Armor Template, Ingress Gateway, Egress Gateway, Agent Registry, and both ReasoningEngine Agents) **must be created in the same region** (`REGION` in [`cfg/env.sh`](./cfg/env.sh)).
+   - If your previous region (`us-central1`) already had an Egress Agent Gateway deleted and recreated (`BKI #16`), set `export REGION="asia-southeast1"` (or `us-east1`) in [`cfg/env.sh`](./cfg/env.sh) and run `./render_configs.sh && source cfg/env.sh` before starting!
+2. **Step 1 (UI) — Create the Model Armor Template first:**
    - Go to **Security $\rightarrow$ Model Armor $\rightarrow$ Templates** $\rightarrow$ **Create Template**.
-   - Name: `agw-study-ingress-modar-req-template`, Region: **`us-central1`** (or `asia-southeast1`).
+   - Name: `agw-study-ingress-modar-req-template`, Region: **`${REGION}`** (e.g., `us-central1` or `asia-southeast1`).
    - Enable **Prompt injection and jailbreak detection** (`Low and above`) and **Responsible AI** filters, and click **Create**.
-2. **Step 2 (UI) — Create the Ingress Agent Gateway + AI Security in One Wizard:**
+3. **Step 2 (UI) — Create the Ingress Agent Gateway + AI Security in One Wizard:**
    - Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways** $\rightarrow$ **Create Gateway**.
-   - Name: `agw-study-ingress`, Region: **`us-central1`**, Governed access path: **Client-to-Agent (ingress)**.
+   - Name: `agw-study-ingress`, Region: **`${REGION}`**, Governed access path: **Client-to-Agent (ingress)**.
    - In the **AI Security (Model Armor)** section of the wizard, toggle **Enable AI Security** ON and select `agw-study-ingress-modar-req-template` for both Request and Response templates!
    - Click **Create**.
    - *Why doing this in the UI is great:* The UI automatically creates `agw-study-ingress-aisecurity-authzpolicy` and `agw-study-ingress-aisecurity-authzextension` with the exact names that enable the UI **Edit** and **Remove** buttons on the Gateway Details page!
-   - *(Note: If you test prompt inspection and need the `authorization` header forwarded to Model Armor, run `gcloud beta service-extensions authz-extensions import agw-study-ingress-aisecurity-authzextension --source=cfg/agw-study-ingress-svc-ext-modar.yaml --location=us-central1` once after creation.)*
-3. **Step 3 (UI) — Create the Egress Agent Gateway + IAP Access Authorization in One Wizard:**
+   - *(Then run `gcloud beta service-extensions authz-extensions import "${AGW_INGRESS_EXT_NAME}" --source=cfg/agw-study-ingress-svc-ext-modar.yaml --location="${REGION}" --project="${PROJECT_ID}"` so `forwardHeaders: ["authorization"]` and `failOpen: false` are set.)*
+4. **Step 3 (UI) — Create the Egress Agent Gateway + IAP Access Authorization in One Wizard:**
    - Go to **Agent Platform $\rightarrow$ Agents $\rightarrow$ Gateways** $\rightarrow$ **Create Gateway**.
-   - Name: `agw-study-egress`, Region: **`us-central1`**, Governed access path: **Agent-to-Anywhere (egress)**.
-   - Under **Registries**, select your `us-central1` and `global` Agent Registries.
+   - Name: `agw-study-egress`, Region: **`${REGION}`**, Governed access path: **Agent-to-Anywhere (egress)**.
+   - Under **Registries**, select your `${REGION}` and `global` Agent Registries.
    - Under **Access authorization**, select **Enforce** (or **Audit only**) and **Unified Access Policy (recommended)**, then click **Create**.
-   - *Why doing this in the UI is great:* The UI automatically creates `agw-study-egress-iap-authzpolicy` and `agw-study-egress-iap-authzextension` so the **Access authorization** card and its **Remove** button appear directly on the Gateway Details UI page!
-4. **Step 4 (CLI — Required Only for Deploying Python Agent Code with `agentGatewayConfig`):**
-   - Because Vertex AI Agent Engine (`ReasoningEngine`) source deployments require packaging your Python code (`check_gcp_subnet_ips` and `network_agent`) with `identity_type="AGENT_IDENTITY"` and `agentGatewayConfig`, run `deploy_agent.py` (see Step 2 in Section 7 above) and then run `./render_configs.sh --auto-discover` to update `cfg/env.sh` with any new random `ReasoningEngine` IDs!
+   - *(Then run `gcloud beta service-extensions authz-extensions import "${AGW_EGRESS_EXT_NAME}" --source=cfg/agw-study-egress-svc-ext-iap.yaml --location="${REGION}" --project="${PROJECT_ID}"` so `failOpen: false` is set.)*
+5. **Step 4 (CLI — Required Only for Deploying Python Agent Code with `agentGatewayConfig`):**
+   - Because Vertex AI Agent Engine (`ReasoningEngine`) source deployments require packaging your Python code (`check_gcp_subnet_ips` and `network_agent`) with `identity_type="AGENT_IDENTITY"` and `agentGatewayConfig`, run `deploy_agent.py` (see Step 2 & Step 3c in Section 7 above) and then run `./render_configs.sh --auto-discover` to update `cfg/env.sh` with any new random `ReasoningEngine` IDs!
 
